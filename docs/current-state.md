@@ -21,16 +21,27 @@ design. Update it in every feature pull request.
 - Project selection changes the active project context and recommendation.
 - Bee live context can be enabled or paused.
 - Model route selection is interactive.
-- Command submission produces user feedback.
+- Command submission produces feedback that identifies the selected model route
+  and whether Bee context was included.
 - A suggested coding action enters the work queue in the Plan phase.
+- Repeating an approval for the same active project reuses the existing task
+  instead of creating duplicate work.
 - Coding tasks advance through Plan, Sandbox, Implement, Test, and PR.
+- Terminal PR tasks cannot be advanced again, and queue filtering works across
+  all, coding-agent, and assistant work.
 - A coding task retains the Vercel Sandbox and PR-approval labels.
 - Normal assistant work is labeled as control-plane work with no sandbox.
+- Project rows remain selectable inside the Projects workspace.
+- MCP, calendar, and working-memory controls produce visible prototype actions.
+- The Today heading is generated from the user's current browser date.
 
 ### Quality and documentation
 
-- Domain unit tests protect the runtime boundary and lifecycle saturation.
-- Production build and Sites worker contract.
+- Domain unit tests protect the runtime boundary, lifecycle saturation,
+  duplicate-task handling, immutable selection, queue transitions, and date
+  formatting.
+- The clean-check quality gate runs domain tests, a production build, then the
+  Sites worker contract without depending on an existing `dist` directory.
 - End-to-end architecture, data model, runtime, security, development, and
   roadmap documentation.
 - Agent handoff rules in `AGENTS.md`.

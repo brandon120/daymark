@@ -43,10 +43,20 @@ Primary interactions tested in the cloud browser:
 - Bee live-context switch toggles and updates `aria-checked`.
 - Model route changes from Claude Sonnet 4 to Codex.
 - Command input accepts and submits a planning request.
+- Command feedback preserves both the selected model route and Bee-context
+  choice.
 - Priority completion updates the accessible action label.
 - Approving a coding suggestion adds a third work-queue item in the Plan phase
   without claiming that a sandbox already exists.
-- Existing coding lifecycle controls remain visible through PR.
+- Repeating the same approval keeps one active task and reports that the task is
+  already queued.
+- Project selection remains interactive inside the Projects workspace.
+- Queue filters cycle through all, coding-agent, and assistant work.
+- Existing coding lifecycle controls remain visible through PR, and the PR
+  phase is terminal and disabled.
+- Collapsed sidebar navigation retains accessible button names.
+- MCP, calendar, and working-memory controls provide visible feedback instead
+  of acting as inert affordances.
 
 Console review found no application-origin errors or warnings. The browser
 reported extension metadata errors from a `chrome-extension://` URL; these are
@@ -73,6 +83,18 @@ alignment. Dense UI details are readable in the focused artifact.
 - Fixes made from visual comparison: none required.
 - Post-fix evidence: not applicable; the first browser-rendered comparison met
   the blocking fidelity bar.
+
+### Review hardening pass
+
+- Resolved all ten initial review findings covering clean-check ordering,
+  navigation names, workspace selection, toast ownership, duplicate approvals,
+  domain transitions, inert controls, command context, terminal phases, and the
+  dynamic Today date.
+- Clean verification passed with the prior `dist` directory absent: seven
+  domain tests, production build, and four Sites worker tests.
+- Focused browser regression passed for command context, MCP navigation,
+  project selection, duplicate approvals, queue filters, and terminal task
+  protection.
 
 ## Follow-up polish
 

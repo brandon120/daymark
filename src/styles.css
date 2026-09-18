@@ -933,6 +933,10 @@ select:focus-visible {
   text-align: center;
 }
 
+.phase:disabled {
+  cursor: default;
+}
+
 .phase::before,
 .phase::after {
   content: "";
@@ -974,6 +978,11 @@ select:focus-visible {
 
 .phase--active > span {
   box-shadow: 0 0 0 2px rgba(116, 168, 255, 0.2);
+}
+
+.phase--terminal > span {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 2px rgba(244, 193, 92, 0.16);
 }
 
 .phase small {

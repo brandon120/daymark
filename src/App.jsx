@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   CaretDown,
@@ -27,7 +27,13 @@ import {
   schedule,
   workspaceDetails,
 } from "./data.js";
-import { codingPhases, createCodingTask, nextCodingPhase } from "./domain.js";
+import {
+  advanceCodingTask,
+  codingPhases,
+  enqueueCodingTask,
+  formatToday,
+  toggleSetMember,
+} from "./domain.js";
 
 const icons = { Sun, Folder, ShieldCheck, FileText, Robot, ShareNetwork, Code, Stack };
 
@@ -57,6 +63,7 @@ function Sidebar({ activeView, onNavigate }) {
             key={item.id}
             className={`nav-item ${activeView === item.id ? "nav-item--active" : ""}`}
             onClick={() => onNavigate(item.id)}
+            aria-label={item.label}
           >
             <NavIcon name={item.icon} />
             <span>{item.label}</span>
@@ -76,7 +83,7 @@ function Sidebar({ activeView, onNavigate }) {
   );
 }
 
-function CommandBar({ beeLive, onBeeChange, onSubmit }) {
+function CommandBar({ beeLive, onBeeChange, onOpenMcp, onSubmit }) {
   const [command, setCommand] = useState("");
   const [model, setModel] = useState("Claude Sonnet 4");
 
@@ -84,7 +91,7 @@ function CommandBar({ beeLive, onBeeChange, onSubmit }) {
     event.preventDefault();
     const value = command.trim();
     if (!value) return;
-    onSubmit(value);
+    onSubmit({ text: value, model, beeLive });
     setCommand("");
   }
 
@@ -111,7 +118,7 @@ function CommandBar({ beeLive, onBeeChange, onSubmit }) {
         <CaretDown size={13} aria-hidden="true" />
       </label>
 
-      <button className="mcp-control" type="button" aria-label="3 connected MCP servers">
+      <button className="mcp-control" type="button" aria-label="3 connected MCP servers" onClick={onOpenMcp}>
         <LinkSimple size={18} />
         <span>3 MCP</span>
         <CaretDown size={13} />
@@ -197,15 +204,15 @@ function Priorities({ completed, onToggle }) {
   );
 }
 
-function ProjectPulse({ activeProjectId, onSelect }) {
+function ProjectPulse({ activeProjectId, headingId = "project-pulse-title", onSelect, showViewAll = true }) {
   return (
-    <section className="project-pulse" aria-labelledby="project-pulse-title">
+    <section className="project-pulse" aria-labelledby={headingId}>
       <div className="section-heading-row">
         <div>
-          <h2 id="project-pulse-title" className="section-title">Project Pulse</h2>
+          <h2 id={headingId} className="section-title">Project Pulse</h2>
           <p>Key projects at a glance. Select one to ground Daymark’s next action.</p>
         </div>
-        <button className="text-button" onClick={() => onSelect("all")}>View all projects <ArrowRight size={14} /></button>
+        {showViewAll && <button className="text-button" onClick={() => onSelect("all")}>View all projects <ArrowRight size={14} /></button>}
       </div>
       <div className="project-table" role="table" aria-label="Active project state">
         <div className="project-head" role="row">
@@ -236,12 +243,12 @@ function ProjectPulse({ activeProjectId, onSelect }) {
   );
 }
 
-function Schedule() {
+function Schedule({ onOpenCalendar }) {
   return (
     <section className="rail-section schedule" aria-labelledby="schedule-title">
       <div className="rail-heading">
         <h2 id="schedule-title">Today’s Schedule</h2>
-        <button>View calendar <ArrowRight size={14} /></button>
+        <button onClick={onOpenCalendar}>View calendar <ArrowRight size={14} /></button>
       </div>
       <div className="schedule-list">
         {schedule.map((item) => (
@@ -258,14 +265,23 @@ function Schedule() {
 }
 
 function WorkQueue({ queue, onAdvance }) {
+  const [filter, setFilter] = useState("all");
+  const filteredQueue = filter === "all" ? queue : queue.filter((item) => item.kind === filter);
+
+  function cycleFilter() {
+    setFilter((current) => current === "all" ? "coding" : current === "coding" ? "assistant" : "all");
+  }
+
   return (
     <section className="rail-section work-queue" aria-labelledby="queue-title">
       <div className="rail-heading">
         <h2 id="queue-title">Work Queue <span>({queue.length})</span></h2>
-        <button className="queue-filter">All tasks <CaretDown size={12} /></button>
+        <button className="queue-filter" onClick={cycleFilter} aria-label={`Filter queue, currently ${filter}`}>
+          {filter === "all" ? "All tasks" : filter === "coding" ? "Coding" : "Assistant"} <CaretDown size={12} />
+        </button>
       </div>
       <div className="queue-list">
-        {queue.map((item) => (
+        {filteredQueue.map((item) => (
           <article className="queue-item" key={item.id}>
             <div className={`queue-icon queue-icon--${item.kind}`}>
               {item.kind === "coding" ? <Code size={18} /> : <FileText size={18} />}
@@ -276,17 +292,22 @@ function WorkQueue({ queue, onAdvance }) {
               <div className={`runtime-label runtime-label--${item.kind}`}><StatusDot tone={item.kind === "coding" ? "healthy" : "blue"} />{item.status}</div>
               {item.kind === "coding" && (
                 <div className="phase-tracker" aria-label={`Current phase: ${codingPhases[item.phase]}`}>
-                  {codingPhases.map((phase, index) => (
-                    <button
-                      key={phase}
-                      className={index < item.phase ? "phase phase--done" : index === item.phase ? "phase phase--active" : "phase"}
-                      onClick={() => index === item.phase && onAdvance(item.id)}
-                      aria-label={index === item.phase ? `Advance from ${phase}` : phase}
-                    >
-                      <span>{index < item.phase ? <Check size={10} weight="bold" /> : null}</span>
-                      <small>{phase}</small>
-                    </button>
-                  ))}
+                  {codingPhases.map((phase, index) => {
+                    const isTerminal = index === codingPhases.length - 1;
+                    const isCurrent = index === item.phase;
+                    return (
+                      <button
+                        key={phase}
+                        className={index < item.phase ? "phase phase--done" : isCurrent ? `phase phase--active ${isTerminal ? "phase--terminal" : ""}` : "phase"}
+                        onClick={() => isCurrent && !isTerminal && onAdvance(item.id)}
+                        aria-label={isCurrent && !isTerminal ? `Advance from ${phase}` : isCurrent ? `${phase} awaiting review` : phase}
+                        disabled={!isCurrent || isTerminal}
+                      >
+                        <span>{index < item.phase ? <Check size={10} weight="bold" /> : null}</span>
+                        <small>{phase}</small>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -297,13 +318,13 @@ function WorkQueue({ queue, onAdvance }) {
   );
 }
 
-function WorkingMemory() {
+function WorkingMemory({ onOpenMemory = () => {} }) {
   return (
     <section className="rail-section working-memory" aria-labelledby="memory-title">
       <div className="rail-heading"><h2 id="memory-title">Working Memory</h2><small>Updated 10:24 AM</small></div>
       <div className="memory-list">
         {memories.map((memory) => (
-          <button key={memory.title}>
+          <button key={memory.title} onClick={() => onOpenMemory(memory.title)}>
             <NavIcon name={memory.icon} size={18} />
             <span><strong>{memory.title}</strong><small>{memory.detail}</small></span>
           </button>
@@ -313,7 +334,7 @@ function WorkingMemory() {
   );
 }
 
-function WorkspacePanel({ view, onClose }) {
+function WorkspacePanel({ activeProjectId, onAction, onClose, onSelectProject, view }) {
   const detail = workspaceDetails[view];
   if (!detail) return null;
   return (
@@ -327,23 +348,23 @@ function WorkspacePanel({ view, onClose }) {
         <button onClick={onClose} aria-label="Close workspace"><X size={20} /></button>
       </div>
       <div className="workspace-content">
-        {view === "projects" && <ProjectPulse activeProjectId="device-mcp" onSelect={() => {}} />}
-        {view === "memory" && <WorkingMemory />}
-        {view === "files" && <EmptyWorkspace icon="FileText" title="Project files stay durable" copy="Daymark will keep source documents and generated artifacts in project-scoped object storage, never inside an ephemeral sandbox." />}
-        {view === "agents" && <EmptyWorkspace icon="Robot" title="Workers are policy-bound" copy="Each worker receives a scoped task, selected model route, allowed MCP tools, and an auditable approval policy." />}
-        {view === "connections" && <EmptyWorkspace icon="ShareNetwork" title="Connections are explicit" copy="Register MCP servers and providers, inspect their scopes, and decide which chat or agent surfaces may use them." />}
+        {view === "projects" && <ProjectPulse activeProjectId={activeProjectId} headingId="workspace-project-pulse-title" onSelect={onSelectProject} showViewAll={false} />}
+        {view === "memory" && <WorkingMemory onOpenMemory={(title) => onAction(`Opened ${title} memory details.`)} />}
+        {view === "files" && <EmptyWorkspace icon="FileText" title="Project files stay durable" copy="Daymark will keep source documents and generated artifacts in project-scoped object storage, never inside an ephemeral sandbox." onAction={onAction} />}
+        {view === "agents" && <EmptyWorkspace icon="Robot" title="Workers are policy-bound" copy="Each worker receives a scoped task, selected model route, allowed MCP tools, and an auditable approval policy." onAction={onAction} />}
+        {view === "connections" && <EmptyWorkspace icon="ShareNetwork" title="Connections are explicit" copy="Register MCP servers and providers, inspect their scopes, and decide which chat or agent surfaces may use them." onAction={onAction} />}
       </div>
     </section>
   );
 }
 
-function EmptyWorkspace({ icon, title, copy }) {
+function EmptyWorkspace({ icon, title, copy, onAction }) {
   return (
     <div className="empty-workspace">
       <NavIcon name={icon} size={28} />
       <h2>{title}</h2>
       <p>{copy}</p>
-      <button className="secondary-button">Review planned architecture</button>
+      <button className="secondary-button" onClick={() => onAction(`${title} architecture plan is documented and ready for implementation.`)}>Review planned architecture</button>
     </div>
   );
 }
@@ -360,42 +381,42 @@ export function App() {
   const [completed, setCompleted] = useState(new Set());
   const [queue, setQueue] = useState(initialQueue);
   const [toast, setToast] = useState("");
+  const toastTimer = useRef(null);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? projects[1],
     [activeProjectId],
   );
 
+  useEffect(() => () => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+  }, []);
+
   function notify(message) {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
     setToast(message);
-    window.setTimeout(() => setToast(""), 3200);
+    toastTimer.current = window.setTimeout(() => {
+      setToast("");
+      toastTimer.current = null;
+    }, 3200);
   }
 
   function togglePriority(id) {
-    setCompleted((current) => {
-      const next = new Set(current);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+    setCompleted((current) => toggleSetMember(current, id));
   }
 
   function approveSuggestion() {
-    const task = createCodingTask(activeProject.name);
-    setQueue((current) => current.some((item) => item.title === task.title) ? current : [...current, task]);
+    const result = enqueueCodingTask(queue, activeProject.name);
+    if (!result.added) {
+      notify(`${activeProject.name} already has an active planning task in the queue.`);
+      return;
+    }
+    setQueue(result.queue);
     notify(`Planning started for ${activeProject.name}. No sandbox has been created yet.`);
   }
 
   function advanceTask(id) {
-    setQueue((current) => current.map((item) => {
-      if (item.id !== id || item.kind !== "coding") return item;
-      const phase = nextCodingPhase(item.phase);
-      const reachedPr = phase === codingPhases.length - 1;
-      return {
-        ...item,
-        phase,
-        status: reachedPr ? "Pull request ready — your approval required" : "Vercel Sandbox — PR approval required",
-      };
-    }));
+    setQueue((current) => advanceCodingTask(current, id));
   }
 
   function selectProject(id) {
@@ -413,7 +434,7 @@ export function App() {
       <main className="main-stage">
         <div className="primary-column">
           <header className="page-header">
-            <div className="date-row"><span>Friday, September 18, 2026</span><blockquote>“A quieter mind builds bolder things.”</blockquote></div>
+            <div className="date-row"><span>{formatToday()}</span><blockquote>“A quieter mind builds bolder things.”</blockquote></div>
             <h1>Today’s Flight Plan</h1>
             <p>Focus on the work that moves things forward. Tell me what you’re aiming for, and I’ll take care of the rest.</p>
           </header>
@@ -421,7 +442,8 @@ export function App() {
           <CommandBar
             beeLive={beeLive}
             onBeeChange={(value) => { setBeeLive(value); notify(value ? "Bee live context enabled." : "Bee live context paused."); }}
-            onSubmit={(value) => notify(`Daymark received: “${value}”`)}
+            onOpenMcp={() => { setActiveView("connections"); notify("Opened MCP connections and tool permissions."); }}
+            onSubmit={({ text, model, beeLive: includedBee }) => notify(`Sent with ${model}${includedBee ? " + Bee context" : ""}: “${text}”`)}
           />
 
           <Suggestion
@@ -435,12 +457,20 @@ export function App() {
         </div>
 
         <aside className="context-rail" aria-label="Today’s context">
-          <Schedule />
+          <Schedule onOpenCalendar={() => notify("Calendar details opened for today’s schedule.")} />
           <WorkQueue queue={queue} onAdvance={advanceTask} />
-          <WorkingMemory />
+          <WorkingMemory onOpenMemory={(title) => { setActiveView("memory"); notify(`Opened ${title} memory details.`); }} />
         </aside>
 
-        {activeView !== "today" && <WorkspacePanel view={activeView} onClose={() => setActiveView("today")} />}
+        {activeView !== "today" && (
+          <WorkspacePanel
+            activeProjectId={activeProjectId}
+            onAction={notify}
+            onClose={() => setActiveView("today")}
+            onSelectProject={selectProject}
+            view={activeView}
+          />
+        )}
       </main>
       <Toast message={toast} />
     </div>

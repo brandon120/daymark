@@ -1,0 +1,9 @@
+{
+  "deploy": {
+    "startCommand": "npm start",
+    "variables": {
+      "RAILPACK_NO_SPA": "1",
+      "RAILPACK_NODE_VERSION": "20"
+    }
+  }
+}

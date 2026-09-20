@@ -1,0 +1,55 @@
+import { createServer } from "node:http";
+import { securityHeaders, validateStartupConfig } from "./config.mjs";
+import { writeHttpResponse } from "./http-response.mjs";
+import { handleApiRequest } from "./router.mjs";
+import { clientBuildExists, serveStatic } from "./static.mjs";
+import { registerGracefulShutdown } from "./lifecycle.mjs";
+
+const { port } = validateStartupConfig();
+
+function withSecurityHeaders(response) {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(securityHeaders())) {
+    headers.set(key, value);
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function dispatch(incoming) {
+  const apiResponse = await handleApiRequest(incoming);
+  if (apiResponse) {
+    return withSecurityHeaders(apiResponse);
+  }
+
+  const staticResponse = await serveStatic(incoming);
+  if (staticResponse) {
+    return withSecurityHeaders(staticResponse);
+  }
+
+  return withSecurityHeaders(new Response(JSON.stringify({ error: "Not found" }), {
+    status: 404,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  }));
+}
+
+const server = createServer((incoming, outgoing) => {
+  dispatch(incoming)
+    .then((response) => writeHttpResponse(incoming, outgoing, response))
+    .catch((error) => {
+      console.error(error);
+      outgoing.writeHead(500, { "content-type": "application/json", ...securityHeaders() });
+      outgoing.end(JSON.stringify({ error: "Internal server error" }));
+    });
+});
+
+registerGracefulShutdown(server);
+
+server.listen(port, "0.0.0.0", () => {
+  const mode = clientBuildExists() ? "web + api" : "api only";
+  console.log(`Daymark production server (${mode}) listening on http://0.0.0.0:${port}`);
+});

@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: daymark
+      POSTGRES_PASSWORD: daymark
+      POSTGRES_DB: daymark
+    volumes:
+      - daymark_pg_data:/var/lib/postgresql/data
+
+volumes:
+  daymark_pg_data:

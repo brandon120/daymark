@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.next/
+.git/
+.preview-vite.config.ts
+.builder-state.json
+.env
+.env.*
+*.log
+.DS_Store

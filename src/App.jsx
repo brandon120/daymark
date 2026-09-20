@@ -1,0 +1,858 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowRight,
+  CaretDown,
+  CaretRight,
+  Check,
+  Circle,
+  Code,
+  FileText,
+  Folder,
+  LinkSimple,
+  Microphone,
+  Robot,
+  ShareNetwork,
+  ShieldCheck,
+  Sparkle,
+  Stack,
+  Sun,
+  X,
+} from "@phosphor-icons/react";
+import {
+  advanceTask as advanceTaskRequest,
+  archiveProject as archiveProjectRequest,
+  createProject as createProjectRequest,
+  createSession,
+  enqueueCodingTask as enqueueCodingTaskRequest,
+  getSession,
+  getToday,
+  isApiConfigured,
+  openQueueEventSource,
+  setActiveProject as setActiveProjectRequest,
+  setBeeLive as setBeeLiveRequest,
+  togglePriority as togglePriorityRequest,
+  updateProject as updateProjectRequest,
+} from "./api.js";
+import { ProjectsWorkspace } from "./projectsWorkspace.jsx";
+import { navigation, workspaceDetails } from "./data.js";
+import {
+  advanceCodingTask,
+  codingPhases,
+  createProjectDefaults,
+  enqueueCodingTask,
+  formatToday,
+} from "./domain.js";
+import { createMockToday } from "./mockToday.js";
+
+const icons = { Sun, Folder, ShieldCheck, FileText, Robot, ShareNetwork, Code, Stack };
+
+function NavIcon({ name, size = 21 }) {
+  const Icon = icons[name] ?? Circle;
+  return <Icon size={size} weight="regular" aria-hidden="true" />;
+}
+
+function StatusDot({ tone = "muted" }) {
+  return <span className={`status-dot status-dot--${tone}`} aria-hidden="true" />;
+}
+
+function Sidebar({ activeView, onNavigate, workspace }) {
+  return (
+    <aside className="sidebar" aria-label="Primary navigation">
+      <button className="brand" onClick={() => onNavigate("today")} aria-label="Daymark home">
+        <span className="brand-mark"><Sun size={17} weight="fill" /></span>
+        <span>
+          <strong>Daymark</strong>
+          <small>A calmer, more capable you.</small>
+        </span>
+      </button>
+
+      <nav className="nav-list">
+        {navigation.map((item) => (
+          <button
+            key={item.id}
+            className={`nav-item ${activeView === item.id ? "nav-item--active" : ""}`}
+            onClick={() => onNavigate(item.id)}
+            aria-label={item.label}
+          >
+            <NavIcon name={item.icon} />
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      <button className="profile" onClick={() => onNavigate("connections")}>
+        <span className="avatar">{workspace.userInitials}</span>
+        <span className="profile-copy">
+          <strong>{workspace.userDisplayName}</strong>
+          <small>{workspace.name}</small>
+        </span>
+        <CaretRight size={15} aria-hidden="true" />
+      </button>
+    </aside>
+  );
+}
+
+function CommandBar({ beeLive, onBeeChange, onOpenMcp, onSubmit }) {
+  const [command, setCommand] = useState("");
+  const [model, setModel] = useState("Claude Sonnet 4");
+
+  function submit(event) {
+    event.preventDefault();
+    const value = command.trim();
+    if (!value) return;
+    onSubmit({ text: value, model, beeLive });
+    setCommand("");
+  }
+
+  return (
+    <form className="command-bar" onSubmit={submit}>
+      <label className="command-input-wrap">
+        <span className="sr-only">Ask Daymark</span>
+        <input
+          value={command}
+          onChange={(event) => setCommand(event.target.value)}
+          placeholder="Ask, plan, delegate, or give an instruction…"
+        />
+        <Microphone size={20} aria-hidden="true" />
+      </label>
+
+      <label className="select-control">
+        <span className="sr-only">Model route</span>
+        <Robot size={18} aria-hidden="true" />
+        <select value={model} onChange={(event) => setModel(event.target.value)}>
+          <option>Claude Sonnet 4</option>
+          <option>Codex</option>
+          <option>AI Gateway · Auto</option>
+        </select>
+        <CaretDown size={13} aria-hidden="true" />
+      </label>
+
+      <button className="mcp-control" type="button" aria-label="3 connected MCP servers" onClick={onOpenMcp}>
+        <LinkSimple size={18} />
+        <span>3 MCP</span>
+        <CaretDown size={13} />
+      </button>
+
+      <label className="bee-toggle">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={beeLive}
+          className={`switch ${beeLive ? "switch--on" : ""}`}
+          onClick={() => onBeeChange(!beeLive)}
+        >
+          <span />
+        </button>
+        <span>
+          <strong>Use live Bee context</strong>
+          <small>Memory, calendar, files & tools</small>
+        </span>
+      </label>
+
+      <button className="send-button" type="submit">
+        <span>Send</span>
+        <ArrowRight size={17} weight="bold" />
+      </button>
+    </form>
+  );
+}
+
+function Suggestion({ activeProject, onApprove, onDiscuss }) {
+  const isDevice = activeProject.id === "device-mcp";
+  return (
+    <section className="suggestion" aria-labelledby="suggestion-title">
+      <Sparkle size={22} weight="fill" aria-hidden="true" />
+      <div className="suggestion-copy">
+        <span className="eyebrow">Suggestion</span>
+        <h2 id="suggestion-title">
+          {isDevice ? "Advance Device MCP’s enrollment reliability?" : `Advance ${activeProject.name}’s next milestone?`}
+        </h2>
+        <p>
+          I can scope the change, implement it with tests, and open a pull request for your review.
+          This runs in an isolated Vercel Sandbox and won’t affect production.
+        </p>
+      </div>
+      <div className="suggestion-actions">
+        <div>
+          <button className="primary-button" onClick={onApprove}>Yes, run it</button>
+          <button className="secondary-button" onClick={onDiscuss}>Discuss</button>
+        </div>
+        <small>Sandboxed in Vercel <span>•</span> PR requires approval</small>
+      </div>
+    </section>
+  );
+}
+
+function Priorities({ priorities, onToggle }) {
+  return (
+    <section className="priorities" aria-labelledby="priorities-title">
+      <h2 id="priorities-title" className="section-title">Today’s Priorities</h2>
+      <div className="priority-list">
+        {priorities.map((item, index) => (
+          <article className={`priority-row ${item.completed ? "priority-row--done" : ""}`} key={item.id}>
+            <span className="priority-index">{index + 1}</span>
+            <div className="priority-content">
+              <div className="priority-meta">
+                <strong>{item.group}</strong>
+                <span>{item.time}</span>
+                {item.project && <span className="project-label"><StatusDot tone={item.tone} />{item.project}</span>}
+              </div>
+              <button className="todo-toggle" onClick={() => onToggle(item.id)} aria-label={`Mark ${item.title} ${item.completed ? "incomplete" : "complete"}`}>
+                <span className="todo-circle">{item.completed && <Check size={15} weight="bold" />}</span>
+                <span>
+                  <strong>{item.title}</strong>
+                  <small>{item.detail}</small>
+                </span>
+              </button>
+            </div>
+            <CaretRight size={15} className="row-caret" aria-hidden="true" />
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProjectPulse({ projects, activeProjectId, headingId = "project-pulse-title", onSelect, showViewAll = true }) {
+  return (
+    <section className="project-pulse" aria-labelledby={headingId}>
+      <div className="section-heading-row">
+        <div>
+          <h2 id={headingId} className="section-title">Project Pulse</h2>
+          <p>Key projects at a glance. Select one to ground Daymark’s next action.</p>
+        </div>
+        {showViewAll && <button className="text-button" onClick={() => onSelect("all")}>View all projects <ArrowRight size={14} /></button>}
+      </div>
+      <div className="project-table" role="table" aria-label="Active project state">
+        <div className="project-head" role="row">
+          <span role="columnheader">Project</span>
+          <span role="columnheader">Phase</span>
+          <span role="columnheader">Latest change</span>
+          <span role="columnheader">Next milestone</span>
+          <span role="columnheader">Blockers</span>
+          <span role="columnheader">Agent / Worker</span>
+        </div>
+        {projects.map((project) => (
+          <button
+            className={`project-row ${activeProjectId === project.id ? "project-row--active" : ""}`}
+            key={project.id}
+            onClick={() => onSelect(project.id)}
+            role="row"
+          >
+            <span className="project-name" role="cell"><span className={`project-icon project-icon--${project.color}`}><Stack size={15} /></span>{project.name}</span>
+            <span role="cell"><StatusDot tone={project.phaseTone} />{project.phase}</span>
+            <span role="cell"><strong>{project.updated}</strong><small>{project.latestChange}</small></span>
+            <span role="cell"><strong>{project.milestone}</strong><small>{project.milestoneTiming}</small></span>
+            <span role="cell"><StatusDot tone={project.blockerTone} />{project.blocker}</span>
+            <span role="cell"><StatusDot tone={project.workerState.includes("Running") ? "healthy" : "muted"} /><strong>{project.worker}</strong><small>{project.workerState}</small></span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Schedule({ schedule, onOpenCalendar }) {
+  return (
+    <section className="rail-section schedule" aria-labelledby="schedule-title">
+      <div className="rail-heading">
+        <h2 id="schedule-title">Today’s Schedule</h2>
+        <button onClick={onOpenCalendar}>View calendar <ArrowRight size={14} /></button>
+      </div>
+      <div className="schedule-list">
+        {schedule.map((item) => (
+          <div className="schedule-row" key={`${item.time}-${item.title}`}>
+            <StatusDot tone={item.tone} />
+            <time>{item.time}</time>
+            <span><strong>{item.title}</strong>{item.detail && <small>{item.detail}</small>}<small>{item.duration}</small></span>
+          </div>
+        ))}
+      </div>
+      <p className="timezone">All times in your local timezone</p>
+    </section>
+  );
+}
+
+function WorkQueue({ queue, onAdvance }) {
+  const [filter, setFilter] = useState("all");
+  const filteredQueue = filter === "all" ? queue : queue.filter((item) => item.kind === filter);
+
+  function cycleFilter() {
+    setFilter((current) => current === "all" ? "coding" : current === "coding" ? "assistant" : "all");
+  }
+
+  return (
+    <section className="rail-section work-queue" aria-labelledby="queue-title">
+      <div className="rail-heading">
+        <h2 id="queue-title">Work Queue <span>({queue.length})</span></h2>
+        <button className="queue-filter" onClick={cycleFilter} aria-label={`Filter queue, currently ${filter}`}>
+          {filter === "all" ? "All tasks" : filter === "coding" ? "Coding" : "Assistant"} <CaretDown size={12} />
+        </button>
+      </div>
+      <div className="queue-list">
+        {filteredQueue.map((item) => (
+          <article className="queue-item" key={item.id}>
+            <div className={`queue-icon queue-icon--${item.kind}`}>
+              {item.kind === "coding" ? <Code size={18} /> : <FileText size={18} />}
+            </div>
+            <div className="queue-copy">
+              <div className="queue-title-row"><strong>{item.title}</strong><small>{item.elapsed}</small></div>
+              <p>{item.description}</p>
+              <div className={`runtime-label runtime-label--${item.kind}`}><StatusDot tone={item.kind === "coding" ? "healthy" : "blue"} />{item.status}</div>
+              {item.kind === "coding" && (
+                <div className="phase-tracker" aria-label={`Current phase: ${codingPhases[item.phase]}`}>
+                  {codingPhases.map((phase, index) => {
+                    const isTerminal = index === codingPhases.length - 1;
+                    const isCurrent = index === item.phase;
+                    return (
+                      <button
+                        key={phase}
+                        className={index < item.phase ? "phase phase--done" : isCurrent ? `phase phase--active ${isTerminal ? "phase--terminal" : ""}` : "phase"}
+                        onClick={() => isCurrent && !isTerminal && onAdvance(item.id)}
+                        aria-label={isCurrent && !isTerminal ? `Advance from ${phase}` : isCurrent ? `${phase} awaiting review` : phase}
+                        disabled={!isCurrent || isTerminal}
+                      >
+                        <span>{index < item.phase ? <Check size={10} weight="bold" /> : null}</span>
+                        <small>{phase}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function WorkingMemory({ memories, updatedAt, onOpenMemory = () => {} }) {
+  const updatedLabel = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(updatedAt));
+
+  return (
+    <section className="rail-section working-memory" aria-labelledby="memory-title">
+      <div className="rail-heading"><h2 id="memory-title">Working Memory</h2><small>Updated {updatedLabel}</small></div>
+      <div className="memory-list">
+        {memories.map((memory) => (
+          <button key={memory.title} onClick={() => onOpenMemory(memory.title)}>
+            <NavIcon name={memory.icon} size={18} />
+            <span><strong>{memory.title}</strong><small>{memory.detail}</small></span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function WorkspacePanel({
+  activeProjectId,
+  onAction,
+  onArchiveProject,
+  onClose,
+  onCreateProject,
+  onSelectProject,
+  onUpdateProject,
+  projects,
+  today,
+  view,
+}) {
+  const detail = workspaceDetails[view];
+  if (!detail) return null;
+  return (
+    <section className="workspace-panel" aria-labelledby="workspace-title">
+      <div className="workspace-header">
+        <div>
+          <span className="eyebrow">{detail.eyebrow}</span>
+          <h1 id="workspace-title">{detail.title}</h1>
+          <p>{detail.description}</p>
+        </div>
+        <button onClick={onClose} aria-label="Close workspace"><X size={20} /></button>
+      </div>
+      <div className="workspace-content">
+        {view === "projects" && (
+          <ProjectsWorkspace
+            activeProjectId={activeProjectId}
+            onArchive={onArchiveProject}
+            onCreate={onCreateProject}
+            onSelectProject={onSelectProject}
+            onUpdate={onUpdateProject}
+            projects={projects}
+          />
+        )}
+        {view === "memory" && <WorkingMemory memories={today.memories} updatedAt={today.workingMemoryUpdatedAt} onOpenMemory={(title) => onAction(`Opened ${title} memory details.`)} />}
+        {view === "files" && <EmptyWorkspace icon="FileText" title="Project files stay durable" copy="Daymark will keep source documents and generated artifacts in project-scoped object storage, never inside an ephemeral sandbox." onAction={onAction} />}
+        {view === "agents" && <EmptyWorkspace icon="Robot" title="Workers are policy-bound" copy="Each worker receives a scoped task, selected model route, allowed MCP tools, and an auditable approval policy." onAction={onAction} />}
+        {view === "connections" && <EmptyWorkspace icon="ShareNetwork" title="Connections are explicit" copy="Register MCP servers and providers, inspect their scopes, and decide which chat or agent surfaces may use them." onAction={onAction} />}
+      </div>
+    </section>
+  );
+}
+
+function EmptyWorkspace({ icon, title, copy, onAction }) {
+  return (
+    <div className="empty-workspace">
+      <NavIcon name={icon} size={28} />
+      <h2>{title}</h2>
+      <p>{copy}</p>
+      <button className="secondary-button" onClick={() => onAction(`${title} architecture plan is documented and ready for implementation.`)}>Review planned architecture</button>
+    </div>
+  );
+}
+
+function Toast({ message }) {
+  if (!message) return null;
+  return <div className="toast" role="status"><Check size={16} weight="bold" />{message}</div>;
+}
+
+function LoadingState() {
+  return (
+    <div className="main-stage">
+      <div className="primary-column">
+        <header className="page-header">
+          <h1>Loading Today’s Flight Plan…</h1>
+          <p>Restoring your workspace from the control plane.</p>
+        </header>
+      </div>
+    </div>
+  );
+}
+
+function ErrorState({ message, onRetry }) {
+  return (
+    <div className="main-stage">
+      <div className="primary-column">
+        <header className="page-header">
+          <h1>Couldn’t load Today</h1>
+          <p>{message}</p>
+          <button className="secondary-button" onClick={onRetry}>Try again</button>
+        </header>
+      </div>
+    </div>
+  );
+}
+
+function LoginGate({ onSubmit, errorMessage }) {
+  const [token, setToken] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    const value = token.trim();
+    if (!value) return;
+
+    setSubmitting(true);
+    try {
+      await onSubmit(value);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="main-stage">
+      <div className="primary-column">
+        <header className="page-header">
+          <h1>Sign in to Daymark</h1>
+          <p>Enter your workspace access token once. It stays in an HttpOnly session cookie and is never stored in the browser bundle.</p>
+        </header>
+        <form className="command-bar" onSubmit={submit}>
+          <label className="command-input-wrap">
+            <span className="sr-only">Access token</span>
+            <input
+              type="password"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              placeholder="Paste your Daymark access token"
+              autoComplete="current-password"
+            />
+          </label>
+          <button className="send-button" type="submit" disabled={submitting}>
+            <span>{submitting ? "Signing in…" : "Continue"}</span>
+            <ArrowRight size={17} weight="bold" />
+          </button>
+        </form>
+        {errorMessage && <p>{errorMessage}</p>}
+      </div>
+    </div>
+  );
+}
+
+export function App() {
+  const [activeView, setActiveView] = useState("today");
+  const [today, setToday] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [authState, setAuthState] = useState("checking");
+  const [loginError, setLoginError] = useState("");
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef(null);
+  const usingApi = isApiConfigured();
+
+  const loadToday = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    setLoginError("");
+
+    if (!usingApi) {
+      setToday(createMockToday());
+      setAuthState("authenticated");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const session = await getSession();
+      if (!session.authenticated) {
+        setAuthState("unauthenticated");
+        setToday(null);
+        return;
+      }
+
+      const data = await getToday();
+      setToday(data);
+      setAuthState("authenticated");
+    } catch (loadError) {
+      if (loadError.status === 401) {
+        setAuthState("unauthenticated");
+        setToday(null);
+      } else {
+        setError(loadError.message ?? "Unable to reach the Daymark API.");
+        setAuthState("authenticated");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [usingApi]);
+
+  async function handleLogin(token) {
+    setLoginError("");
+    try {
+      await createSession(token);
+      await loadToday();
+    } catch (loginFailure) {
+      setLoginError(loginFailure.message ?? "Sign in failed.");
+    }
+  }
+
+  useEffect(() => {
+    loadToday();
+  }, [loadToday]);
+
+  useEffect(() => () => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+  }, []);
+
+  useEffect(() => {
+    if (!usingApi || authState !== "authenticated") {
+      return undefined;
+    }
+
+    const source = openQueueEventSource({
+      onQueueUpdate: (queue) => {
+        setToday((current) => (current ? { ...current, queue } : current));
+      },
+    });
+
+    return () => source.close();
+  }, [usingApi, authState]);
+
+  const activeProject = useMemo(() => {
+    if (!today) return null;
+    return today.projects.find((project) => project.id === today.activeProjectId) ?? today.projects[0];
+  }, [today]);
+
+  function notify(message) {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    setToast(message);
+    toastTimer.current = window.setTimeout(() => {
+      setToast("");
+      toastTimer.current = null;
+    }, 3200);
+  }
+
+  async function applyTodayUpdate(updatePromise, successMessage) {
+    try {
+      const updated = await updatePromise;
+      setToday(updated);
+      if (successMessage) notify(successMessage);
+      return updated;
+    } catch (updateError) {
+      if (updateError.status === 409 && updateError.body?.today) {
+        setToday(updateError.body.today);
+      }
+      notify(updateError.body?.message ?? updateError.message ?? "Update failed.");
+      return null;
+    }
+  }
+
+  async function togglePriority(priorityId) {
+    if (usingApi) {
+      await applyTodayUpdate(togglePriorityRequest(priorityId, crypto.randomUUID()));
+      return;
+    }
+
+    setToday((current) => ({
+      ...current,
+      priorities: current.priorities.map((item) => (
+        item.id === priorityId ? { ...item, completed: !item.completed } : item
+      )),
+    }));
+  }
+
+  async function approveSuggestion() {
+    if (!activeProject) return;
+
+    if (usingApi) {
+      const updated = await applyTodayUpdate(
+        enqueueCodingTaskRequest(activeProject.name, crypto.randomUUID()),
+        `Planning started for ${activeProject.name}. No sandbox has been created yet.`,
+      );
+      if (!updated && today) {
+        const duplicate = today.queue.some((item) => item.title === `Advance ${activeProject.name}`);
+        if (duplicate) {
+          notify(`${activeProject.name} already has an active planning task in the queue.`);
+        }
+      }
+      return;
+    }
+
+    const result = enqueueCodingTask(today.queue, activeProject.name);
+    if (!result.added) {
+      notify(`${activeProject.name} already has an active planning task in the queue.`);
+      return;
+    }
+    setToday({ ...today, queue: result.queue });
+    notify(`Planning started for ${activeProject.name}. No sandbox has been created yet.`);
+  }
+
+  async function advanceTask(id) {
+    if (usingApi) {
+      const task = today.queue.find((item) => item.id === id);
+      const idempotencyKey = task ? `advance-task:${id}:${task.phase ?? 0}` : crypto.randomUUID();
+      await applyTodayUpdate(advanceTaskRequest(id, idempotencyKey));
+      return;
+    }
+
+    setToday((current) => ({
+      ...current,
+      queue: advanceCodingTask(current.queue, id),
+    }));
+  }
+
+  async function selectProject(id) {
+    if (id === "all") {
+      setActiveView("projects");
+      return;
+    }
+
+    if (usingApi) {
+      const updated = await applyTodayUpdate(
+        setActiveProjectRequest(id, crypto.randomUUID()),
+        `${today.projects.find((project) => project.id === id)?.name} is now active context.`,
+      );
+      if (updated) setToday(updated);
+      return;
+    }
+
+    setToday((current) => ({ ...current, activeProjectId: id }));
+    notify(`${today.projects.find((project) => project.id === id)?.name} is now active context.`);
+  }
+
+  async function handleCreateProject(input) {
+    if (usingApi) {
+      const updated = await createProjectRequest(input, crypto.randomUUID());
+      setToday(updated);
+      notify(`${input.name} added to your portfolio.`);
+      return;
+    }
+
+    const defaults = createProjectDefaults(input.name, today.projects.length);
+    const project = {
+      id: defaults.id,
+      name: input.name,
+      phase: input.phase ?? defaults.phase,
+      phaseTone: "neutral",
+      updated: "just now",
+      latestChange: input.latestChange ?? defaults.latestChange,
+      milestone: input.milestone ?? defaults.milestone,
+      milestoneTiming: input.milestoneTiming ?? defaults.milestoneTiming,
+      blocker: input.blocker ?? defaults.blocker,
+      blockerTone: "healthy",
+      worker: input.worker ?? defaults.worker,
+      workerState: "Idle",
+      color: input.color ?? defaults.color,
+      version: 1,
+    };
+
+    if (today.projects.some((item) => item.id === project.id)) {
+      throw Object.assign(new Error("Project already exists"), {
+        body: { message: "Project already exists" },
+      });
+    }
+
+    setToday({ ...today, projects: [...today.projects, project] });
+    notify(`${project.name} added to your portfolio.`);
+  }
+
+  async function handleUpdateProject(projectId, input) {
+    if (usingApi) {
+      try {
+        const updated = await updateProjectRequest(projectId, input, crypto.randomUUID());
+        setToday(updated);
+        notify("Project updated.");
+      } catch (updateError) {
+        if (updateError.status === 409 && updateError.body?.project) {
+          setToday((current) => {
+            if (!current) return current;
+            return {
+              ...current,
+              projects: current.projects.map((project) => (
+                project.id === updateError.body.project.id ? updateError.body.project : project
+              )),
+            };
+          });
+        }
+        throw updateError;
+      }
+      return;
+    }
+
+    const { version: _version, ...fields } = input;
+    setToday((current) => ({
+      ...current,
+      projects: current.projects.map((project) => (
+        project.id === projectId
+          ? {
+              ...project,
+              ...fields,
+              version: project.version + 1,
+              updated: "just now",
+            }
+          : project
+      )),
+    }));
+    notify("Project updated.");
+  }
+
+  async function handleArchiveProject(projectId) {
+    if (usingApi) {
+      const updated = await archiveProjectRequest(projectId, crypto.randomUUID());
+      setToday(updated);
+      notify("Project archived.");
+      return;
+    }
+
+    const remaining = today.projects.filter((project) => project.id !== projectId);
+    const nextActiveProjectId = today.activeProjectId === projectId
+      ? (remaining[0]?.id ?? today.activeProjectId)
+      : today.activeProjectId;
+
+    setToday({
+      ...today,
+      projects: remaining,
+      activeProjectId: nextActiveProjectId,
+    });
+    notify("Project archived.");
+  }
+
+  async function handleBeeChange(value) {
+    if (usingApi) {
+      await applyTodayUpdate(
+        setBeeLiveRequest(value, crypto.randomUUID()),
+        value ? "Bee live context enabled." : "Bee live context paused.",
+      );
+      return;
+    }
+
+    setToday((current) => ({ ...current, beeLive: value }));
+    notify(value ? "Bee live context enabled." : "Bee live context paused.");
+  }
+
+  if (loading) {
+    return (
+      <div className="app-shell">
+        <Sidebar activeView={activeView} onNavigate={setActiveView} workspace={{ userInitials: "…", userDisplayName: "Daymark", name: "Loading" }} />
+        <LoadingState />
+      </div>
+    );
+  }
+
+  if (usingApi && authState === "unauthenticated") {
+    return (
+      <div className="app-shell">
+        <Sidebar activeView={activeView} onNavigate={setActiveView} workspace={{ userInitials: "DM", userDisplayName: "Daymark", name: "Sign in required" }} />
+        <LoginGate onSubmit={handleLogin} errorMessage={loginError} />
+      </div>
+    );
+  }
+
+  if (error || !today || !activeProject) {
+    return (
+      <div className="app-shell">
+        <Sidebar activeView={activeView} onNavigate={setActiveView} workspace={{ userInitials: "!", userDisplayName: "Daymark", name: "Offline" }} />
+        <ErrorState message={error || "Today data is unavailable."} onRetry={loadToday} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <Sidebar activeView={activeView} onNavigate={setActiveView} workspace={today.workspace} />
+      <main className="main-stage">
+        <div className="primary-column">
+          <header className="page-header">
+            <div className="date-row"><span>{formatToday()}</span><blockquote>“A quieter mind builds bolder things.”</blockquote></div>
+            <h1>Today’s Flight Plan</h1>
+            <p>Focus on the work that moves things forward. Tell me what you’re aiming for, and I’ll take care of the rest.</p>
+          </header>
+
+          <CommandBar
+            beeLive={today.beeLive}
+            onBeeChange={handleBeeChange}
+            onOpenMcp={() => { setActiveView("connections"); notify("Opened MCP connections and tool permissions."); }}
+            onSubmit={({ text, model, beeLive: includedBee }) => notify(`Sent with ${model}${includedBee ? " + Bee context" : ""}: “${text}”`)}
+          />
+
+          <Suggestion
+            activeProject={activeProject}
+            onApprove={approveSuggestion}
+            onDiscuss={() => notify(`Opening a planning conversation for ${activeProject.name}.`)}
+          />
+
+          <Priorities priorities={today.priorities} onToggle={togglePriority} />
+          <ProjectPulse projects={today.projects} activeProjectId={today.activeProjectId} onSelect={selectProject} />
+        </div>
+
+        <aside className="context-rail" aria-label="Today’s context">
+          <Schedule schedule={today.schedule} onOpenCalendar={() => notify("Calendar details opened for today’s schedule.")} />
+          <WorkQueue queue={today.queue} onAdvance={advanceTask} />
+          <WorkingMemory
+            memories={today.memories}
+            updatedAt={today.workingMemoryUpdatedAt}
+            onOpenMemory={(title) => { setActiveView("memory"); notify(`Opened ${title} memory details.`); }}
+          />
+        </aside>
+
+        {activeView !== "today" && (
+          <WorkspacePanel
+            activeProjectId={today.activeProjectId}
+            onAction={notify}
+            onArchiveProject={handleArchiveProject}
+            onClose={() => setActiveView("today")}
+            onCreateProject={handleCreateProject}
+            onSelectProject={selectProject}
+            onUpdateProject={handleUpdateProject}
+            projects={today.projects}
+            today={today}
+            view={activeView}
+          />
+        )}
+      </main>
+      <Toast message={toast} />
+    </div>
+  );
+}

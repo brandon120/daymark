@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   CaretDown,
@@ -19,21 +19,22 @@ import {
   X,
 } from "@phosphor-icons/react";
 import {
-  initialQueue,
-  memories,
-  navigation,
-  priorities,
-  projects,
-  schedule,
-  workspaceDetails,
-} from "./data.js";
+  advanceTask as advanceTaskRequest,
+  enqueueCodingTask as enqueueCodingTaskRequest,
+  getToday,
+  isApiConfigured,
+  setActiveProject as setActiveProjectRequest,
+  setBeeLive as setBeeLiveRequest,
+  togglePriority as togglePriorityRequest,
+} from "./api.js";
+import { navigation, workspaceDetails } from "./data.js";
 import {
   advanceCodingTask,
   codingPhases,
   enqueueCodingTask,
   formatToday,
-  toggleSetMember,
 } from "./domain.js";
+import { createMockToday } from "./mockToday.js";
 
 const icons = { Sun, Folder, ShieldCheck, FileText, Robot, ShareNetwork, Code, Stack };
 
@@ -46,7 +47,7 @@ function StatusDot({ tone = "muted" }) {
   return <span className={`status-dot status-dot--${tone}`} aria-hidden="true" />;
 }
 
-function Sidebar({ activeView, onNavigate }) {
+function Sidebar({ activeView, onNavigate, workspace }) {
   return (
     <aside className="sidebar" aria-label="Primary navigation">
       <button className="brand" onClick={() => onNavigate("today")} aria-label="Daymark home">
@@ -72,10 +73,10 @@ function Sidebar({ activeView, onNavigate }) {
       </nav>
 
       <button className="profile" onClick={() => onNavigate("connections")}>
-        <span className="avatar">BM</span>
+        <span className="avatar">{workspace.userInitials}</span>
         <span className="profile-copy">
-          <strong>Brandon</strong>
-          <small>Personal workspace</small>
+          <strong>{workspace.userDisplayName}</strong>
+          <small>{workspace.name}</small>
         </span>
         <CaretRight size={15} aria-hidden="true" />
       </button>
@@ -174,13 +175,13 @@ function Suggestion({ activeProject, onApprove, onDiscuss }) {
   );
 }
 
-function Priorities({ completed, onToggle }) {
+function Priorities({ priorities, onToggle }) {
   return (
     <section className="priorities" aria-labelledby="priorities-title">
       <h2 id="priorities-title" className="section-title">Today’s Priorities</h2>
       <div className="priority-list">
         {priorities.map((item, index) => (
-          <article className={`priority-row ${completed.has(item.id) ? "priority-row--done" : ""}`} key={item.id}>
+          <article className={`priority-row ${item.completed ? "priority-row--done" : ""}`} key={item.id}>
             <span className="priority-index">{index + 1}</span>
             <div className="priority-content">
               <div className="priority-meta">
@@ -188,8 +189,8 @@ function Priorities({ completed, onToggle }) {
                 <span>{item.time}</span>
                 {item.project && <span className="project-label"><StatusDot tone={item.tone} />{item.project}</span>}
               </div>
-              <button className="todo-toggle" onClick={() => onToggle(item.id)} aria-label={`Mark ${item.title} ${completed.has(item.id) ? "incomplete" : "complete"}`}>
-                <span className="todo-circle">{completed.has(item.id) && <Check size={15} weight="bold" />}</span>
+              <button className="todo-toggle" onClick={() => onToggle(item.id)} aria-label={`Mark ${item.title} ${item.completed ? "incomplete" : "complete"}`}>
+                <span className="todo-circle">{item.completed && <Check size={15} weight="bold" />}</span>
                 <span>
                   <strong>{item.title}</strong>
                   <small>{item.detail}</small>
@@ -204,7 +205,7 @@ function Priorities({ completed, onToggle }) {
   );
 }
 
-function ProjectPulse({ activeProjectId, headingId = "project-pulse-title", onSelect, showViewAll = true }) {
+function ProjectPulse({ projects, activeProjectId, headingId = "project-pulse-title", onSelect, showViewAll = true }) {
   return (
     <section className="project-pulse" aria-labelledby={headingId}>
       <div className="section-heading-row">
@@ -243,7 +244,7 @@ function ProjectPulse({ activeProjectId, headingId = "project-pulse-title", onSe
   );
 }
 
-function Schedule({ onOpenCalendar }) {
+function Schedule({ schedule, onOpenCalendar }) {
   return (
     <section className="rail-section schedule" aria-labelledby="schedule-title">
       <div className="rail-heading">
@@ -318,10 +319,15 @@ function WorkQueue({ queue, onAdvance }) {
   );
 }
 
-function WorkingMemory({ onOpenMemory = () => {} }) {
+function WorkingMemory({ memories, updatedAt, onOpenMemory = () => {} }) {
+  const updatedLabel = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(updatedAt));
+
   return (
     <section className="rail-section working-memory" aria-labelledby="memory-title">
-      <div className="rail-heading"><h2 id="memory-title">Working Memory</h2><small>Updated 10:24 AM</small></div>
+      <div className="rail-heading"><h2 id="memory-title">Working Memory</h2><small>Updated {updatedLabel}</small></div>
       <div className="memory-list">
         {memories.map((memory) => (
           <button key={memory.title} onClick={() => onOpenMemory(memory.title)}>
@@ -334,7 +340,7 @@ function WorkingMemory({ onOpenMemory = () => {} }) {
   );
 }
 
-function WorkspacePanel({ activeProjectId, onAction, onClose, onSelectProject, view }) {
+function WorkspacePanel({ activeProjectId, onAction, onClose, onSelectProject, projects, today, view }) {
   const detail = workspaceDetails[view];
   if (!detail) return null;
   return (
@@ -348,8 +354,8 @@ function WorkspacePanel({ activeProjectId, onAction, onClose, onSelectProject, v
         <button onClick={onClose} aria-label="Close workspace"><X size={20} /></button>
       </div>
       <div className="workspace-content">
-        {view === "projects" && <ProjectPulse activeProjectId={activeProjectId} headingId="workspace-project-pulse-title" onSelect={onSelectProject} showViewAll={false} />}
-        {view === "memory" && <WorkingMemory onOpenMemory={(title) => onAction(`Opened ${title} memory details.`)} />}
+        {view === "projects" && <ProjectPulse projects={projects} activeProjectId={activeProjectId} headingId="workspace-project-pulse-title" onSelect={onSelectProject} showViewAll={false} />}
+        {view === "memory" && <WorkingMemory memories={today.memories} updatedAt={today.workingMemoryUpdatedAt} onOpenMemory={(title) => onAction(`Opened ${title} memory details.`)} />}
         {view === "files" && <EmptyWorkspace icon="FileText" title="Project files stay durable" copy="Daymark will keep source documents and generated artifacts in project-scoped object storage, never inside an ephemeral sandbox." onAction={onAction} />}
         {view === "agents" && <EmptyWorkspace icon="Robot" title="Workers are policy-bound" copy="Each worker receives a scoped task, selected model route, allowed MCP tools, and an auditable approval policy." onAction={onAction} />}
         {view === "connections" && <EmptyWorkspace icon="ShareNetwork" title="Connections are explicit" copy="Register MCP servers and providers, inspect their scopes, and decide which chat or agent surfaces may use them." onAction={onAction} />}
@@ -374,23 +380,68 @@ function Toast({ message }) {
   return <div className="toast" role="status"><Check size={16} weight="bold" />{message}</div>;
 }
 
+function LoadingState() {
+  return (
+    <div className="main-stage">
+      <div className="primary-column">
+        <header className="page-header">
+          <h1>Loading Today’s Flight Plan…</h1>
+          <p>Restoring your workspace from the control plane.</p>
+        </header>
+      </div>
+    </div>
+  );
+}
+
+function ErrorState({ message, onRetry }) {
+  return (
+    <div className="main-stage">
+      <div className="primary-column">
+        <header className="page-header">
+          <h1>Couldn’t load Today</h1>
+          <p>{message}</p>
+          <button className="secondary-button" onClick={onRetry}>Try again</button>
+        </header>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const [activeView, setActiveView] = useState("today");
-  const [beeLive, setBeeLive] = useState(true);
-  const [activeProjectId, setActiveProjectId] = useState("device-mcp");
-  const [completed, setCompleted] = useState(new Set());
-  const [queue, setQueue] = useState(initialQueue);
+  const [today, setToday] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
+  const usingApi = isApiConfigured();
 
-  const activeProject = useMemo(
-    () => projects.find((project) => project.id === activeProjectId) ?? projects[1],
-    [activeProjectId],
-  );
+  const loadToday = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const data = usingApi ? await getToday() : createMockToday();
+      setToday(data);
+    } catch (loadError) {
+      setError(loadError.message ?? "Unable to reach the Daymark API.");
+    } finally {
+      setLoading(false);
+    }
+  }, [usingApi]);
+
+  useEffect(() => {
+    loadToday();
+  }, [loadToday]);
 
   useEffect(() => () => {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
   }, []);
+
+  const activeProject = useMemo(() => {
+    if (!today) return null;
+    return today.projects.find((project) => project.id === today.activeProjectId) ?? today.projects[0];
+  }, [today]);
 
   function notify(message) {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
@@ -401,36 +452,126 @@ export function App() {
     }, 3200);
   }
 
-  function togglePriority(id) {
-    setCompleted((current) => toggleSetMember(current, id));
+  async function applyTodayUpdate(updatePromise, successMessage) {
+    try {
+      const updated = await updatePromise;
+      setToday(updated);
+      if (successMessage) notify(successMessage);
+      return updated;
+    } catch (updateError) {
+      if (updateError.status === 409 && updateError.body?.today) {
+        setToday(updateError.body.today);
+      }
+      notify(updateError.body?.message ?? updateError.message ?? "Update failed.");
+      return null;
+    }
   }
 
-  function approveSuggestion() {
-    const result = enqueueCodingTask(queue, activeProject.name);
+  async function togglePriority(priorityId) {
+    if (usingApi) {
+      await applyTodayUpdate(togglePriorityRequest(priorityId));
+      return;
+    }
+
+    setToday((current) => ({
+      ...current,
+      priorities: current.priorities.map((item) => (
+        item.id === priorityId ? { ...item, completed: !item.completed } : item
+      )),
+    }));
+  }
+
+  async function approveSuggestion() {
+    if (!activeProject) return;
+
+    if (usingApi) {
+      const updated = await applyTodayUpdate(
+        enqueueCodingTaskRequest(activeProject.name),
+        `Planning started for ${activeProject.name}. No sandbox has been created yet.`,
+      );
+      if (!updated && today) {
+        const duplicate = today.queue.some((item) => item.title === `Advance ${activeProject.name}`);
+        if (duplicate) {
+          notify(`${activeProject.name} already has an active planning task in the queue.`);
+        }
+      }
+      return;
+    }
+
+    const result = enqueueCodingTask(today.queue, activeProject.name);
     if (!result.added) {
       notify(`${activeProject.name} already has an active planning task in the queue.`);
       return;
     }
-    setQueue(result.queue);
+    setToday({ ...today, queue: result.queue });
     notify(`Planning started for ${activeProject.name}. No sandbox has been created yet.`);
   }
 
-  function advanceTask(id) {
-    setQueue((current) => advanceCodingTask(current, id));
+  async function advanceTask(id) {
+    if (usingApi) {
+      await applyTodayUpdate(advanceTaskRequest(id));
+      return;
+    }
+
+    setToday((current) => ({
+      ...current,
+      queue: advanceCodingTask(current.queue, id),
+    }));
   }
 
-  function selectProject(id) {
+  async function selectProject(id) {
     if (id === "all") {
       setActiveView("projects");
       return;
     }
-    setActiveProjectId(id);
-    notify(`${projects.find((project) => project.id === id)?.name} is now active context.`);
+
+    if (usingApi) {
+      const updated = await applyTodayUpdate(
+        setActiveProjectRequest(id),
+        `${today.projects.find((project) => project.id === id)?.name} is now active context.`,
+      );
+      if (updated) setToday(updated);
+      return;
+    }
+
+    setToday((current) => ({ ...current, activeProjectId: id }));
+    notify(`${today.projects.find((project) => project.id === id)?.name} is now active context.`);
+  }
+
+  async function handleBeeChange(value) {
+    if (usingApi) {
+      await applyTodayUpdate(
+        setBeeLiveRequest(value),
+        value ? "Bee live context enabled." : "Bee live context paused.",
+      );
+      return;
+    }
+
+    setToday((current) => ({ ...current, beeLive: value }));
+    notify(value ? "Bee live context enabled." : "Bee live context paused.");
+  }
+
+  if (loading) {
+    return (
+      <div className="app-shell">
+        <Sidebar activeView={activeView} onNavigate={setActiveView} workspace={{ userInitials: "…", userDisplayName: "Daymark", name: "Loading" }} />
+        <LoadingState />
+      </div>
+    );
+  }
+
+  if (error || !today || !activeProject) {
+    return (
+      <div className="app-shell">
+        <Sidebar activeView={activeView} onNavigate={setActiveView} workspace={{ userInitials: "!", userDisplayName: "Daymark", name: "Offline" }} />
+        <ErrorState message={error || "Today data is unavailable."} onRetry={loadToday} />
+      </div>
+    );
   }
 
   return (
     <div className="app-shell">
-      <Sidebar activeView={activeView} onNavigate={setActiveView} />
+      <Sidebar activeView={activeView} onNavigate={setActiveView} workspace={today.workspace} />
       <main className="main-stage">
         <div className="primary-column">
           <header className="page-header">
@@ -440,8 +581,8 @@ export function App() {
           </header>
 
           <CommandBar
-            beeLive={beeLive}
-            onBeeChange={(value) => { setBeeLive(value); notify(value ? "Bee live context enabled." : "Bee live context paused."); }}
+            beeLive={today.beeLive}
+            onBeeChange={handleBeeChange}
             onOpenMcp={() => { setActiveView("connections"); notify("Opened MCP connections and tool permissions."); }}
             onSubmit={({ text, model, beeLive: includedBee }) => notify(`Sent with ${model}${includedBee ? " + Bee context" : ""}: “${text}”`)}
           />
@@ -452,22 +593,28 @@ export function App() {
             onDiscuss={() => notify(`Opening a planning conversation for ${activeProject.name}.`)}
           />
 
-          <Priorities completed={completed} onToggle={togglePriority} />
-          <ProjectPulse activeProjectId={activeProjectId} onSelect={selectProject} />
+          <Priorities priorities={today.priorities} onToggle={togglePriority} />
+          <ProjectPulse projects={today.projects} activeProjectId={today.activeProjectId} onSelect={selectProject} />
         </div>
 
         <aside className="context-rail" aria-label="Today’s context">
-          <Schedule onOpenCalendar={() => notify("Calendar details opened for today’s schedule.")} />
-          <WorkQueue queue={queue} onAdvance={advanceTask} />
-          <WorkingMemory onOpenMemory={(title) => { setActiveView("memory"); notify(`Opened ${title} memory details.`); }} />
+          <Schedule schedule={today.schedule} onOpenCalendar={() => notify("Calendar details opened for today’s schedule.")} />
+          <WorkQueue queue={today.queue} onAdvance={advanceTask} />
+          <WorkingMemory
+            memories={today.memories}
+            updatedAt={today.workingMemoryUpdatedAt}
+            onOpenMemory={(title) => { setActiveView("memory"); notify(`Opened ${title} memory details.`); }}
+          />
         </aside>
 
         {activeView !== "today" && (
           <WorkspacePanel
-            activeProjectId={activeProjectId}
+            activeProjectId={today.activeProjectId}
             onAction={notify}
             onClose={() => setActiveView("today")}
             onSelectProject={selectProject}
+            projects={today.projects}
+            today={today}
             view={activeView}
           />
         )}

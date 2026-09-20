@@ -8,9 +8,66 @@ cp .env.example .env
 npm run dev -- --host 0.0.0.0 --port 4173 --strictPort
 ```
 
-The current prototype does not require environment variables. The example file
-documents proposed server-side integration names; never populate secrets in a
-committed file.
+The web prototype can run without environment variables and will use local mock
+Today data. To connect the dashboard to the control-plane API:
+
+```bash
+docker compose up -d
+cp .env.example .env
+npm run db:setup
+npm run api:dev
+npm run dev -- --host 0.0.0.0 --port 4173 --strictPort
+```
+
+Set `VITE_DAYMARK_API_TOKEN` and `DAYMARK_API_TOKEN` to the token printed by
+`npm run db:seed`. Leave `VITE_DAYMARK_API_URL` empty to use the Vite dev proxy.
+
+## Railway (single service)
+
+Daymark deploys as **one Railway service** that serves the web UI and API from
+the same origin. You do **not** need object storage for the current Phase 1
+scope — only PostgreSQL.
+
+### Resources
+
+1. **One web/API service** from this repository (`railway.toml` at the repo root).
+2. **One PostgreSQL database** added from the Railway project dashboard.
+
+No Railway volume or bucket is required yet. Project files and run artifacts
+are planned for Phase 3.
+
+### First deploy
+
+1. Push this repository to GitHub.
+2. Create a Railway project and deploy the repo.
+3. Add **PostgreSQL** to the same project.
+4. On the Daymark service, set variables:
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | Reference from the PostgreSQL service |
+| `DAYMARK_API_TOKEN` | Long random secret |
+| `VITE_DAYMARK_API_TOKEN` | Same value as `DAYMARK_API_TOKEN` |
+| `DAYMARK_WORKSPACE_ID` | `00000000-0000-4000-8000-000000000001` |
+| `DAYMARK_SEED_ON_START` | `1` for the first deploy only |
+| `VITE_DAYMARK_API_URL` | Leave empty (same-origin) |
+
+5. Generate a public domain for the service.
+6. After the first successful boot, set `DAYMARK_SEED_ON_START=0` and redeploy.
+
+Railway runs:
+
+- **Build:** `npm ci && npm run build:railway`
+- **Start:** migrations, optional seed, then `apps/api/production.mjs`
+
+Health check path: `/health`
+
+### Local production smoke test
+
+```bash
+npm run build:railway
+DATABASE_URL=... DAYMARK_API_TOKEN=dev npm run start
+```
 
 ## Quality gate
 

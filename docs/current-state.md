@@ -1,6 +1,6 @@
 # Current State
 
-Last updated: 2026-09-18
+Last updated: 2026-09-20
 
 This file is the authoritative boundary between what exists and what is still a
 design. Update it in every feature pull request.
@@ -35,6 +35,32 @@ design. Update it in every feature pull request.
 - MCP, calendar, and working-memory controls produce visible prototype actions.
 - The Today heading is generated from the user's current browser date.
 
+### Control plane (Phase 1 — in progress)
+
+- npm workspaces monorepo with `apps/api`, `packages/domain`, `packages/contracts`,
+  and `packages/database`.
+- PostgreSQL schema for users, workspaces, projects, priorities, schedule items,
+  tasks, working memories, audit events, runs, and approvals.
+- SQL migrations and a seed script that reproduces the dashboard fixture data.
+- Bearer-token authentication against seeded API tokens or `DAYMARK_API_TOKEN`.
+- Control-plane API with:
+  - `GET /health`
+  - `GET /v1/today`
+  - `PATCH /v1/priorities/:id`
+  - `PATCH /v1/workspace/active-project`
+  - `PATCH /v1/workspace/bee-live`
+  - `POST /v1/tasks/coding`
+  - `PATCH /v1/tasks/:id/advance`
+- Audit events for priority toggles, active-project changes, Bee context changes,
+  coding-task enqueue, and coding-task advancement.
+- Web app loads Today from the API when `VITE_DAYMARK_API_TOKEN` is set, with a
+  local mock fallback when it is not.
+- Contract tests for the `/v1/today` response shape.
+- Docker Compose file for local PostgreSQL.
+- Single-service Railway deployment config (`railway.toml`) that builds the web
+  client and serves UI + API from one Node process.
+- CORS support for local dev when the web app and API run on different origins.
+
 ### Quality and documentation
 
 - Domain unit tests protect the runtime boundary, lifecycle saturation,
@@ -63,13 +89,14 @@ design. Update it in every feature pull request.
 
 ## Next recommended implementation
 
-Build the control-plane skeleton with:
+Continue Phase 1:
 
-1. authenticated user and workspace identity;
-2. PostgreSQL migrations for projects, tasks, runs, approvals, and audit events;
-3. a read-only `GET /v1/today` aggregate endpoint;
-4. replacement of the dashboard's mock data with the typed endpoint contract;
-5. contract tests and seed data.
+1. project CRUD endpoints and optimistic versioning;
+2. Production hardening for the single-service Railway deployment;
+3. realtime server events for the work queue;
+4. richer authentication than a single bearer token;
+5. integration tests in CI with PostgreSQL;
+6. tracing and basic budget hooks.
 
 Do not begin sandbox execution until durable runs, approvals, and audit events
-exist.
+are production-ready.

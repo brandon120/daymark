@@ -11,6 +11,10 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     allowedHosts: ["terminal.local"],
+    proxy: {
+      "/v1": "http://localhost:3001",
+      "/health": "http://localhost:3001",
+    },
     warmup: {
       clientFiles: ["./src/main.jsx"],
     },

@@ -1,0 +1,14 @@
+{
+  "name": "@daymark/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./pool": "./pool.js",
+    "./queries/today": "./queries/today.js"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
+  }
+}

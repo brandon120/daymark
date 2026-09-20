@@ -1,4 +1,4 @@
-const DEFAULT_METHODS = "GET, HEAD, POST, PATCH, OPTIONS";
+const DEFAULT_METHODS = "GET, HEAD, POST, PATCH, DELETE, OPTIONS";
 const DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Idempotency-Key";
 
 function allowedOrigins() {
@@ -33,6 +33,7 @@ export function withCors(request, response) {
 
   if (origin) {
     headers.set("access-control-allow-origin", origin);
+    headers.set("access-control-allow-credentials", "true");
     headers.set("vary", "Origin");
   }
 
@@ -56,6 +57,7 @@ export function preflightResponse(request) {
 
   if (origin) {
     headers["access-control-allow-origin"] = origin;
+    headers["access-control-allow-credentials"] = "true";
     headers.vary = "Origin";
   }
 

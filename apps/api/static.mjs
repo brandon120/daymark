@@ -24,12 +24,28 @@ const contentTypes = {
 };
 
 function safePath(pathname) {
-  const decoded = decodeURIComponent(pathname);
-  const normalized = path.normalize(decoded).replace(/^(\.\.[/\\])+/, "");
-  const relative = normalized.startsWith("/") ? normalized.slice(1) : normalized;
-  const resolved = path.resolve(clientRoot, relative);
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
 
-  if (!resolved.startsWith(clientRoot)) {
+  if (decoded.includes("\0")) {
+    return null;
+  }
+
+  const normalized = path.posix.normalize(decoded);
+  const relative = normalized.replace(/^\/+/, "");
+
+  if (!relative || relative.startsWith("..") || relative.split("/").includes("..")) {
+    return null;
+  }
+
+  const resolved = path.resolve(clientRoot, relative);
+  const relativeToRoot = path.relative(clientRoot, resolved);
+
+  if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot)) {
     return null;
   }
 

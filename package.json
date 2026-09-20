@@ -13,7 +13,7 @@
     "build:railway": "vite build",
     "start": "node scripts/start-production.mjs",
     "preview": "vite preview",
-    "test": "node --test tests/domain.test.mjs tests/today.contract.test.mjs tests/production-server.test.mjs",
+    "test": "node --test tests/domain.test.mjs tests/today.contract.test.mjs tests/production-server.test.mjs tests/migrate.test.mjs tests/body-limit.test.mjs",
     "test:integration": "node --test tests/api.integration.test.mjs",
     "check": "npm run test && npm run build && npm run test:sites",
     "test:sites": "node --test tests/sites-worker.test.mjs",

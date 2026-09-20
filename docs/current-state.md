@@ -42,7 +42,8 @@ design. Update it in every feature pull request.
 - PostgreSQL schema for users, workspaces, projects, priorities, schedule items,
   tasks, working memories, audit events, runs, and approvals.
 - SQL migrations and a seed script that reproduces the dashboard fixture data.
-- Bearer-token authentication against seeded API tokens or `DAYMARK_API_TOKEN`.
+- HttpOnly session cookies for browser auth plus server-side bearer tokens for
+  programmatic access. Access tokens are not embedded in the client bundle.
 - Control-plane API with:
   - `GET /health`
   - `GET /v1/today`
@@ -53,8 +54,10 @@ design. Update it in every feature pull request.
   - `PATCH /v1/tasks/:id/advance`
 - Audit events for priority toggles, active-project changes, Bee context changes,
   coding-task enqueue, and coding-task advancement.
-- Web app loads Today from the API when `VITE_DAYMARK_API_TOKEN` is set, with a
-  local mock fallback when it is not.
+- Web app loads Today from the API when `VITE_DAYMARK_USE_API=true`, with a local
+  mock fallback when it is not.
+- Migration runner bootstraps `schema_migrations` before reading it.
+- Mutation idempotency records replay prior responses instead of re-running writes.
 - Contract tests for the `/v1/today` response shape.
 - Docker Compose file for local PostgreSQL.
 - Single-service Railway deployment config (`railway.toml`) that builds the web

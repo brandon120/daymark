@@ -20,7 +20,9 @@ import {
 } from "@phosphor-icons/react";
 import {
   advanceTask as advanceTaskRequest,
+  createSession,
   enqueueCodingTask as enqueueCodingTaskRequest,
+  getSession,
   getToday,
   isApiConfigured,
   setActiveProject as setActiveProjectRequest,
@@ -407,10 +409,58 @@ function ErrorState({ message, onRetry }) {
   );
 }
 
+function LoginGate({ onSubmit, errorMessage }) {
+  const [token, setToken] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    const value = token.trim();
+    if (!value) return;
+
+    setSubmitting(true);
+    try {
+      await onSubmit(value);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="main-stage">
+      <div className="primary-column">
+        <header className="page-header">
+          <h1>Sign in to Daymark</h1>
+          <p>Enter your workspace access token once. It stays in an HttpOnly session cookie and is never stored in the browser bundle.</p>
+        </header>
+        <form className="command-bar" onSubmit={submit}>
+          <label className="command-input-wrap">
+            <span className="sr-only">Access token</span>
+            <input
+              type="password"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              placeholder="Paste your Daymark access token"
+              autoComplete="current-password"
+            />
+          </label>
+          <button className="send-button" type="submit" disabled={submitting}>
+            <span>{submitting ? "Signing in…" : "Continue"}</span>
+            <ArrowRight size={17} weight="bold" />
+          </button>
+        </form>
+        {errorMessage && <p>{errorMessage}</p>}
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const [activeView, setActiveView] = useState("today");
   const [today, setToday] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [authState, setAuthState] = useState("checking");
+  const [loginError, setLoginError] = useState("");
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
@@ -419,16 +469,48 @@ export function App() {
   const loadToday = useCallback(async () => {
     setLoading(true);
     setError("");
+    setLoginError("");
+
+    if (!usingApi) {
+      setToday(createMockToday());
+      setAuthState("authenticated");
+      setLoading(false);
+      return;
+    }
 
     try {
-      const data = usingApi ? await getToday() : createMockToday();
+      const session = await getSession();
+      if (!session.authenticated) {
+        setAuthState("unauthenticated");
+        setToday(null);
+        return;
+      }
+
+      const data = await getToday();
       setToday(data);
+      setAuthState("authenticated");
     } catch (loadError) {
-      setError(loadError.message ?? "Unable to reach the Daymark API.");
+      if (loadError.status === 401) {
+        setAuthState("unauthenticated");
+        setToday(null);
+      } else {
+        setError(loadError.message ?? "Unable to reach the Daymark API.");
+        setAuthState("authenticated");
+      }
     } finally {
       setLoading(false);
     }
   }, [usingApi]);
+
+  async function handleLogin(token) {
+    setLoginError("");
+    try {
+      await createSession(token);
+      await loadToday();
+    } catch (loginFailure) {
+      setLoginError(loginFailure.message ?? "Sign in failed.");
+    }
+  }
 
   useEffect(() => {
     loadToday();
@@ -469,7 +551,7 @@ export function App() {
 
   async function togglePriority(priorityId) {
     if (usingApi) {
-      await applyTodayUpdate(togglePriorityRequest(priorityId));
+      await applyTodayUpdate(togglePriorityRequest(priorityId, crypto.randomUUID()));
       return;
     }
 
@@ -509,7 +591,9 @@ export function App() {
 
   async function advanceTask(id) {
     if (usingApi) {
-      await applyTodayUpdate(advanceTaskRequest(id));
+      const task = today.queue.find((item) => item.id === id);
+      const idempotencyKey = task ? `advance-task:${id}:${task.phase ?? 0}` : crypto.randomUUID();
+      await applyTodayUpdate(advanceTaskRequest(id, idempotencyKey));
       return;
     }
 
@@ -556,6 +640,15 @@ export function App() {
       <div className="app-shell">
         <Sidebar activeView={activeView} onNavigate={setActiveView} workspace={{ userInitials: "…", userDisplayName: "Daymark", name: "Loading" }} />
         <LoadingState />
+      </div>
+    );
+  }
+
+  if (usingApi && authState === "unauthenticated") {
+    return (
+      <div className="app-shell">
+        <Sidebar activeView={activeView} onNavigate={setActiveView} workspace={{ userInitials: "DM", userDisplayName: "Daymark", name: "Sign in required" }} />
+        <LoginGate onSubmit={handleLogin} errorMessage={loginError} />
       </div>
     );
   }

@@ -1,6 +1,20 @@
-import { enqueueCodingTask, nextCodingPhase } from "@daymark/domain";
+import { createCodingTask, nextCodingPhase } from "@daymark/domain";
+import { findIdempotentResponse, storeIdempotentResponse } from "@daymark/database/queries/idempotency.js";
 import { getPool } from "@daymark/database/pool";
 import { getTodayAggregate, recordAuditEvent } from "@daymark/database/queries/today";
+
+async function finishMutation(client, workspaceId, idempotencyKey, status, body) {
+  await storeIdempotentResponse(client, workspaceId, idempotencyKey, status, body);
+  return { status, body };
+}
+
+async function replayOrContinue(client, workspaceId, idempotencyKey) {
+  const replay = await findIdempotentResponse(client, workspaceId, idempotencyKey);
+  if (replay) {
+    return { replay: true, result: replay };
+  }
+  return { replay: false };
+}
 
 export async function handleGetToday(workspaceId) {
   const pool = getPool();
@@ -24,6 +38,12 @@ export async function handleTogglePriority(workspaceId, actor, priorityId, idemp
 
   try {
     await client.query("BEGIN");
+
+    const cached = await replayOrContinue(client, workspaceId, idempotencyKey);
+    if (cached.replay) {
+      await client.query("COMMIT");
+      return cached.result;
+    }
 
     const existing = await client.query(
       `SELECT id, completed FROM priorities WHERE workspace_id = $1 AND id = $2`,
@@ -52,10 +72,10 @@ export async function handleTogglePriority(workspaceId, actor, priorityId, idemp
       idempotencyKey,
     });
 
-    await client.query("COMMIT");
-
     const today = await getTodayAggregate(client, workspaceId);
-    return { status: 200, body: today };
+    const result = await finishMutation(client, workspaceId, idempotencyKey, 200, today);
+    await client.query("COMMIT");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -70,6 +90,12 @@ export async function handleSetActiveProject(workspaceId, actor, projectId, idem
 
   try {
     await client.query("BEGIN");
+
+    const cached = await replayOrContinue(client, workspaceId, idempotencyKey);
+    if (cached.replay) {
+      await client.query("COMMIT");
+      return cached.result;
+    }
 
     const project = await client.query(
       `SELECT id, name FROM projects WHERE workspace_id = $1 AND id = $2`,
@@ -97,10 +123,10 @@ export async function handleSetActiveProject(workspaceId, actor, projectId, idem
       idempotencyKey,
     });
 
-    await client.query("COMMIT");
-
     const today = await getTodayAggregate(client, workspaceId);
-    return { status: 200, body: today };
+    const result = await finishMutation(client, workspaceId, idempotencyKey, 200, today);
+    await client.query("COMMIT");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -115,6 +141,13 @@ export async function handleSetBeeLive(workspaceId, actor, beeLive, idempotencyK
 
   try {
     await client.query("BEGIN");
+
+    const cached = await replayOrContinue(client, workspaceId, idempotencyKey);
+    if (cached.replay) {
+      await client.query("COMMIT");
+      return cached.result;
+    }
+
     await client.query(
       `UPDATE workspaces SET bee_live = $1, updated_at = NOW() WHERE id = $2`,
       [beeLive, workspaceId],
@@ -131,10 +164,10 @@ export async function handleSetBeeLive(workspaceId, actor, beeLive, idempotencyK
       idempotencyKey,
     });
 
-    await client.query("COMMIT");
-
     const today = await getTodayAggregate(client, workspaceId);
-    return { status: 200, body: today };
+    const result = await finishMutation(client, workspaceId, idempotencyKey, 200, today);
+    await client.query("COMMIT");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -146,33 +179,48 @@ export async function handleSetBeeLive(workspaceId, actor, beeLive, idempotencyK
 export async function handleEnqueueCodingTask(workspaceId, actor, projectName, idempotencyKey) {
   const pool = getPool();
   const client = await pool.connect();
+  const taskTitle = `Advance ${projectName}`;
 
   try {
-    const today = await getTodayAggregate(client, workspaceId);
-    const result = enqueueCodingTask(today.queue, projectName);
+    await client.query("BEGIN");
 
-    if (!result.added) {
-      return {
-        status: 409,
-        body: {
-          error: "duplicate_active_task",
-          message: `${projectName} already has an active planning task in the queue.`,
-          today,
-        },
-      };
+    const cached = await replayOrContinue(client, workspaceId, idempotencyKey);
+    if (cached.replay) {
+      await client.query("COMMIT");
+      return cached.result;
     }
 
-    const task = result.task;
-    const project = today.projects.find((item) => item.name === projectName);
+    const existing = await client.query(
+      `SELECT id FROM tasks
+       WHERE workspace_id = $1 AND kind = 'coding' AND title = $2
+       FOR UPDATE`,
+      [workspaceId, taskTitle],
+    );
 
-    await client.query("BEGIN");
+    if (existing.rowCount > 0) {
+      const today = await getTodayAggregate(client, workspaceId);
+      const result = await finishMutation(client, workspaceId, idempotencyKey, 409, {
+        error: "duplicate_active_task",
+        message: `${projectName} already has an active planning task in the queue.`,
+        today,
+      });
+      await client.query("COMMIT");
+      return { status: 409, body: result.body };
+    }
+
+    const task = createCodingTask(projectName);
+    const project = await client.query(
+      `SELECT id FROM projects WHERE workspace_id = $1 AND name = $2`,
+      [workspaceId, projectName],
+    );
+
     await client.query(
       `INSERT INTO tasks (id, workspace_id, project_id, kind, title, description, elapsed_label, status, phase)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [
         task.id,
         workspaceId,
-        project?.id ?? null,
+        project.rows[0]?.id ?? null,
         task.kind,
         task.title,
         task.description,
@@ -193,10 +241,10 @@ export async function handleEnqueueCodingTask(workspaceId, actor, projectName, i
       idempotencyKey,
     });
 
+    const today = await getTodayAggregate(client, workspaceId);
+    const result = await finishMutation(client, workspaceId, idempotencyKey, 201, today);
     await client.query("COMMIT");
-
-    const updated = await getTodayAggregate(client, workspaceId);
-    return { status: 201, body: updated };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -210,17 +258,27 @@ export async function handleAdvanceTask(workspaceId, actor, taskId, idempotencyK
   const client = await pool.connect();
 
   try {
+    await client.query("BEGIN");
+
+    const cached = await replayOrContinue(client, workspaceId, idempotencyKey);
+    if (cached.replay) {
+      await client.query("COMMIT");
+      return cached.result;
+    }
+
     const existing = await client.query(
-      `SELECT id, kind, phase FROM tasks WHERE workspace_id = $1 AND id = $2`,
+      `SELECT id, kind, phase FROM tasks WHERE workspace_id = $1 AND id = $2 FOR UPDATE`,
       [workspaceId, taskId],
     );
 
     if (existing.rowCount === 0) {
+      await client.query("ROLLBACK");
       return { status: 404, body: { error: "Task not found" } };
     }
 
     const task = existing.rows[0];
     if (task.kind !== "coding") {
+      await client.query("ROLLBACK");
       return { status: 400, body: { error: "Only coding tasks can be advanced" } };
     }
 
@@ -230,7 +288,6 @@ export async function handleAdvanceTask(workspaceId, actor, taskId, idempotencyK
       ? "Pull request ready — your approval required"
       : "Vercel Sandbox — PR approval required";
 
-    await client.query("BEGIN");
     await client.query(
       `UPDATE tasks SET phase = $1, status = $2, updated_at = NOW()
        WHERE workspace_id = $3 AND id = $4`,
@@ -248,10 +305,10 @@ export async function handleAdvanceTask(workspaceId, actor, taskId, idempotencyK
       idempotencyKey,
     });
 
-    await client.query("COMMIT");
-
     const today = await getTodayAggregate(client, workspaceId);
-    return { status: 200, body: today };
+    const result = await finishMutation(client, workspaceId, idempotencyKey, 200, today);
+    await client.query("COMMIT");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

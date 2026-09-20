@@ -19,8 +19,10 @@ npm run api:dev
 npm run dev -- --host 0.0.0.0 --port 4173 --strictPort
 ```
 
-Set `VITE_DAYMARK_API_TOKEN` and `DAYMARK_API_TOKEN` to the token printed by
-`npm run db:seed`. Leave `VITE_DAYMARK_API_URL` empty to use the Vite dev proxy.
+Set `VITE_DAYMARK_USE_API=true` for local API mode. Set `DAYMARK_API_TOKEN` to the
+token printed by `npm run db:seed`, then sign in through the web UI. The token is
+never embedded in the client bundle. Leave `VITE_DAYMARK_API_URL` empty to use
+the Vite dev proxy.
 
 ## Railway (single service)
 
@@ -46,11 +48,12 @@ are planned for Phase 3.
 | Variable | Value |
 | --- | --- |
 | `DATABASE_URL` | Reference from the PostgreSQL service |
-| `DAYMARK_API_TOKEN` | Long random secret |
-| `VITE_DAYMARK_API_TOKEN` | Same value as `DAYMARK_API_TOKEN` |
+| `DAYMARK_API_TOKEN` | Long random secret (server-side only) |
+| `VITE_DAYMARK_USE_API` | `true` |
 | `DAYMARK_WORKSPACE_ID` | `00000000-0000-4000-8000-000000000001` |
 | `DAYMARK_SEED_ON_START` | `1` for the first deploy only |
 | `VITE_DAYMARK_API_URL` | Leave empty (same-origin) |
+| `NODE_ENV` | `production` |
 
 5. Generate a public domain for the service.
 6. After the first successful boot, set `DAYMARK_SEED_ON_START=0` and redeploy.

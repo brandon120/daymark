@@ -74,7 +74,6 @@ async function main() {
       );
     }
 
-    await client.query("DELETE FROM priorities WHERE workspace_id = $1", [WORKSPACE_ID]);
     const priorities = [
       ["priority-product-forge", "Deep Work", "9:00 AM – 11:00 AM", "Finish Product Forge onboarding flow", "Complete error states and polish copy. Ship ready for internal beta.", "Product Forge", "amber", 0],
       ["priority-device-mcp", "Project Progress", "11:00 AM – 1:00 PM", "Review Device MCP sandbox results", "Assess changes, run locally, and provide feedback.", "Device MCP", "teal", 1],
@@ -86,31 +85,44 @@ async function main() {
       await client.query(
         `INSERT INTO priorities (
           id, workspace_id, group_name, time_label, title, detail, project_name, tone, sort_order
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        ON CONFLICT (id) DO UPDATE SET
+          group_name = EXCLUDED.group_name,
+          time_label = EXCLUDED.time_label,
+          title = EXCLUDED.title,
+          detail = EXCLUDED.detail,
+          project_name = EXCLUDED.project_name,
+          tone = EXCLUDED.tone,
+          sort_order = EXCLUDED.sort_order`,
         [priority[0], WORKSPACE_ID, ...priority.slice(1)],
       );
     }
 
-    await client.query("DELETE FROM schedule_items WHERE workspace_id = $1", [WORKSPACE_ID]);
     const schedule = [
-      ["8:30 AM", "Coffee & plan", null, "30 min", "muted", 0],
-      ["9:00 AM", "Deep work", "Product Forge", "2 hr", "amber", 1],
-      ["11:00 AM", "Project review", "Device MCP", "2 hr", "teal", 2],
-      ["1:00 PM", "Lunch", null, "1 hr", "muted", 3],
-      ["2:00 PM", "Messages & sync", null, "1 hr", "muted", 4],
-      ["3:30 PM", "Monroe Eve planning", null, "1 hr", "blue", 5],
-      ["4:30 PM", "Weekly review", null, "1 hr", "muted", 6],
+      ["00000000-0000-4000-8000-000000000101", "8:30 AM", "Coffee & plan", null, "30 min", "muted", 0],
+      ["00000000-0000-4000-8000-000000000102", "9:00 AM", "Deep work", "Product Forge", "2 hr", "amber", 1],
+      ["00000000-0000-4000-8000-000000000103", "11:00 AM", "Project review", "Device MCP", "2 hr", "teal", 2],
+      ["00000000-0000-4000-8000-000000000104", "1:00 PM", "Lunch", null, "1 hr", "muted", 3],
+      ["00000000-0000-4000-8000-000000000105", "2:00 PM", "Messages & sync", null, "1 hr", "muted", 4],
+      ["00000000-0000-4000-8000-000000000106", "3:30 PM", "Monroe Eve planning", null, "1 hr", "blue", 5],
+      ["00000000-0000-4000-8000-000000000107", "4:30 PM", "Weekly review", null, "1 hr", "muted", 6],
     ];
 
     for (const item of schedule) {
       await client.query(
-        `INSERT INTO schedule_items (workspace_id, time_label, title, detail, duration, tone, sort_order)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [WORKSPACE_ID, ...item],
+        `INSERT INTO schedule_items (id, workspace_id, time_label, title, detail, duration, tone, sort_order)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (id) DO UPDATE SET
+           time_label = EXCLUDED.time_label,
+           title = EXCLUDED.title,
+           detail = EXCLUDED.detail,
+           duration = EXCLUDED.duration,
+           tone = EXCLUDED.tone,
+           sort_order = EXCLUDED.sort_order`,
+        [item[0], WORKSPACE_ID, ...item.slice(1)],
       );
     }
 
-    await client.query("DELETE FROM tasks WHERE workspace_id = $1", [WORKSPACE_ID]);
     const tasks = [
       ["weekly-brief", "assistant", "Prepare weekly project brief", "Summarize progress, risks, and next steps across all projects.", "12m elapsed", "Control plane — no sandbox", null, null],
       ["device-enrollment", "coding", "Harden Device MCP enrollment", "Implement retry logic, improve error handling, add tests, and open a PR.", "28m elapsed", "Vercel Sandbox — PR approval required", "device-mcp", 2],
@@ -119,23 +131,37 @@ async function main() {
     for (const task of tasks) {
       await client.query(
         `INSERT INTO tasks (id, workspace_id, project_id, kind, title, description, elapsed_label, status, phase)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (id) DO UPDATE SET
+           project_id = EXCLUDED.project_id,
+           kind = EXCLUDED.kind,
+           title = EXCLUDED.title,
+           description = EXCLUDED.description,
+           elapsed_label = EXCLUDED.elapsed_label,
+           status = EXCLUDED.status,
+           phase = EXCLUDED.phase,
+           updated_at = NOW()`,
         [task[0], WORKSPACE_ID, task[6], task[1], task[2], task[3], task[4], task[5], task[7]],
       );
     }
 
-    await client.query("DELETE FROM working_memories WHERE workspace_id = $1", [WORKSPACE_ID]);
     const memories = [
-      ["FileText", "Device MCP", "Enrollment reliability work in progress. Focusing on error handling and tests.", 0],
-      ["Code", "Product Forge", "Onboarding flow nearly complete. Polish copy and ship for internal beta.", 1],
-      ["Stack", "Monroe Eve", "Planning private alpha. Ingest pipeline performance improved.", 2],
+      ["00000000-0000-4000-8000-000000000201", "FileText", "Device MCP", "Enrollment reliability work in progress. Focusing on error handling and tests.", 0],
+      ["00000000-0000-4000-8000-000000000202", "Code", "Product Forge", "Onboarding flow nearly complete. Polish copy and ship for internal beta.", 1],
+      ["00000000-0000-4000-8000-000000000203", "Stack", "Monroe Eve", "Planning private alpha. Ingest pipeline performance improved.", 2],
     ];
 
     for (const memory of memories) {
       await client.query(
-        `INSERT INTO working_memories (workspace_id, icon, title, detail, sort_order, updated_at)
-         VALUES ($1,$2,$3,$4,$5, NOW())`,
-        [WORKSPACE_ID, ...memory],
+        `INSERT INTO working_memories (id, workspace_id, icon, title, detail, sort_order, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6, NOW())
+         ON CONFLICT (id) DO UPDATE SET
+           icon = EXCLUDED.icon,
+           title = EXCLUDED.title,
+           detail = EXCLUDED.detail,
+           sort_order = EXCLUDED.sort_order,
+           updated_at = NOW()`,
+        [memory[0], WORKSPACE_ID, ...memory.slice(1)],
       );
     }
 
@@ -143,7 +169,7 @@ async function main() {
     console.log("Seed complete.");
     console.log(`Workspace ID: ${WORKSPACE_ID}`);
     console.log(`Development API token: ${devToken}`);
-    console.log("Set DAYMARK_API_TOKEN to this value for the web app and API client.");
+    console.log("Set DAYMARK_API_TOKEN to this value for server-side access and sign-in.");
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

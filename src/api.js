@@ -1,28 +1,34 @@
 const API_BASE = import.meta.env.VITE_DAYMARK_API_URL ?? "";
-const API_TOKEN = import.meta.env.VITE_DAYMARK_API_TOKEN ?? "";
 
-function authHeaders(idempotencyKey) {
-  const headers = {
+function buildHeaders(idempotencyKey, extra = {}) {
+  return {
     accept: "application/json",
-    authorization: `Bearer ${API_TOKEN}`,
+    ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+    ...extra,
   };
-
-  if (idempotencyKey) {
-    headers["idempotency-key"] = idempotencyKey;
-  }
-
-  return headers;
 }
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: {
-      ...authHeaders(options.idempotencyKey),
-      ...(options.body ? { "content-type": "application/json" } : {}),
-      ...options.headers,
-    },
+    credentials: "include",
+    headers: buildHeaders(
+      options.idempotencyKey,
+      {
+        ...(options.body ? { "content-type": "application/json" } : {}),
+        ...options.headers,
+      },
+    ),
   });
+
+  if (response.status === 204) {
+    if (!response.ok) {
+      const error = new Error("Request failed");
+      error.status = response.status;
+      throw error;
+    }
+    return null;
+  }
 
   const body = await response.json().catch(() => ({}));
 
@@ -37,17 +43,32 @@ async function request(path, options = {}) {
 }
 
 export function isApiConfigured() {
-  return Boolean(API_TOKEN);
+  return import.meta.env.VITE_DAYMARK_USE_API === "true";
+}
+
+export function getSession() {
+  return request("/v1/session");
+}
+
+export function createSession(token) {
+  return request("/v1/session", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export function deleteSession() {
+  return request("/v1/session", { method: "DELETE" });
 }
 
 export function getToday() {
   return request("/v1/today");
 }
 
-export function togglePriority(priorityId) {
+export function togglePriority(priorityId, idempotencyKey) {
   return request(`/v1/priorities/${priorityId}`, {
     method: "PATCH",
-    idempotencyKey: `priority-toggle-${priorityId}-${Date.now()}`,
+    idempotencyKey,
   });
 }
 
@@ -55,7 +76,7 @@ export function setActiveProject(projectId) {
   return request("/v1/workspace/active-project", {
     method: "PATCH",
     body: JSON.stringify({ projectId }),
-    idempotencyKey: `active-project-${projectId}`,
+    idempotencyKey: `active-project:${projectId}`,
   });
 }
 
@@ -63,7 +84,7 @@ export function setBeeLive(beeLive) {
   return request("/v1/workspace/bee-live", {
     method: "PATCH",
     body: JSON.stringify({ beeLive }),
-    idempotencyKey: `bee-live-${beeLive}`,
+    idempotencyKey: `bee-live:${beeLive}`,
   });
 }
 
@@ -71,13 +92,13 @@ export function enqueueCodingTask(projectName) {
   return request("/v1/tasks/coding", {
     method: "POST",
     body: JSON.stringify({ projectName }),
-    idempotencyKey: `coding-task-${projectName}`,
+    idempotencyKey: `coding-task:${projectName}`,
   });
 }
 
-export function advanceTask(taskId) {
+export function advanceTask(taskId, idempotencyKey) {
   return request(`/v1/tasks/${taskId}/advance`, {
     method: "PATCH",
-    idempotencyKey: `advance-task-${taskId}-${Date.now()}`,
+    idempotencyKey,
   });
 }

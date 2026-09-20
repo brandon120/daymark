@@ -1,5 +1,11 @@
+import { readJsonBody } from "./body.mjs";
 import { authenticateRequest } from "./auth.mjs";
 import { preflightResponse, withCors } from "./cors.mjs";
+import {
+  handleCreateSession,
+  handleDeleteSession,
+  handleGetSession,
+} from "./handlers/session.mjs";
 import {
   handleAdvanceTask,
   handleEnqueueCodingTask,
@@ -9,25 +15,15 @@ import {
   handleTogglePriority,
 } from "./handlers/today.mjs";
 
-function jsonResponse(status, body) {
-  return new Response(JSON.stringify(body), {
+function jsonResponse(status, body, extraHeaders = {}) {
+  return new Response(body ? JSON.stringify(body) : null, {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
+      ...extraHeaders,
     },
   });
-}
-
-async function readJson(incoming) {
-  const chunks = [];
-  for await (const chunk of incoming) {
-    chunks.push(chunk);
-  }
-
-  const text = Buffer.concat(chunks).toString("utf8");
-  if (!text) return {};
-  return JSON.parse(text);
 }
 
 function isApiPath(pathname) {
@@ -48,6 +44,29 @@ export async function handleApiRequest(incoming) {
 
   if (request.method === "GET" && pathname === "/health") {
     return withCors(request, jsonResponse(200, { ok: true, service: "daymark" }));
+  }
+
+  if (request.method === "GET" && pathname === "/v1/session") {
+    const result = await handleGetSession(request);
+    return withCors(request, jsonResponse(result.status, result.body, result.headers));
+  }
+
+  if (request.method === "POST" && pathname === "/v1/session") {
+    const parsed = await readJsonBody(incoming);
+    if (parsed.error) {
+      return withCors(request, jsonResponse(parsed.error.status, { error: parsed.error.message }));
+    }
+
+    const result = await handleCreateSession(parsed.value);
+    return withCors(
+      request,
+      jsonResponse(result.status, result.body, result.headers),
+    );
+  }
+
+  if (request.method === "DELETE" && pathname === "/v1/session") {
+    const result = await handleDeleteSession(request);
+    return withCors(request, jsonResponse(result.status, result.body, result.headers));
   }
 
   if (!pathname.startsWith("/v1/")) {
@@ -74,33 +93,45 @@ export async function handleApiRequest(incoming) {
     }
 
     if (request.method === "PATCH" && pathname === "/v1/workspace/active-project") {
-      const body = await readJson(incoming);
+      const parsed = await readJsonBody(incoming);
+      if (parsed.error) {
+        return withCors(request, jsonResponse(parsed.error.status, { error: parsed.error.message }));
+      }
+
       const result = await handleSetActiveProject(
         auth.workspaceId,
         auth.actor,
-        body.projectId,
+        parsed.value.projectId,
         idempotencyKey,
       );
       return withCors(request, jsonResponse(result.status, result.body));
     }
 
     if (request.method === "PATCH" && pathname === "/v1/workspace/bee-live") {
-      const body = await readJson(incoming);
+      const parsed = await readJsonBody(incoming);
+      if (parsed.error) {
+        return withCors(request, jsonResponse(parsed.error.status, { error: parsed.error.message }));
+      }
+
       const result = await handleSetBeeLive(
         auth.workspaceId,
         auth.actor,
-        Boolean(body.beeLive),
+        Boolean(parsed.value.beeLive),
         idempotencyKey,
       );
       return withCors(request, jsonResponse(result.status, result.body));
     }
 
     if (request.method === "POST" && pathname === "/v1/tasks/coding") {
-      const body = await readJson(incoming);
+      const parsed = await readJsonBody(incoming);
+      if (parsed.error) {
+        return withCors(request, jsonResponse(parsed.error.status, { error: parsed.error.message }));
+      }
+
       const result = await handleEnqueueCodingTask(
         auth.workspaceId,
         auth.actor,
-        body.projectName,
+        parsed.value.projectName,
         idempotencyKey,
       );
       return withCors(request, jsonResponse(result.status, result.body));

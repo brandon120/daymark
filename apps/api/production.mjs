@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { handleApiRequest } from "./router.mjs";
 import { clientBuildExists, serveStatic } from "./static.mjs";
+import { registerGracefulShutdown } from "./lifecycle.mjs";
 
 const port = Number(process.env.PORT ?? 3001);
 
@@ -21,7 +22,7 @@ async function dispatch(incoming) {
   });
 }
 
-createServer((incoming, outgoing) => {
+const server = createServer((incoming, outgoing) => {
   dispatch(incoming)
     .then(async (response) => {
       outgoing.writeHead(response.status, Object.fromEntries(response.headers.entries()));
@@ -43,7 +44,11 @@ createServer((incoming, outgoing) => {
       outgoing.writeHead(500, { "content-type": "application/json" });
       outgoing.end(JSON.stringify({ error: "Internal server error" }));
     });
-}).listen(port, "0.0.0.0", () => {
+});
+
+registerGracefulShutdown(server);
+
+server.listen(port, "0.0.0.0", () => {
   const mode = clientBuildExists() ? "web + api" : "api only";
   console.log(`Daymark production server (${mode}) listening on http://0.0.0.0:${port}`);
 });

@@ -1,9 +1,10 @@
 import { createServer } from "node:http";
 import { handleApiRequest } from "./router.mjs";
+import { registerGracefulShutdown } from "./lifecycle.mjs";
 
 const port = Number(process.env.PORT ?? 3001);
 
-createServer((incoming, outgoing) => {
+const server = createServer((incoming, outgoing) => {
   handleApiRequest(incoming)
     .then(async (response) => {
       const resolved = response ?? new Response(JSON.stringify({ error: "Not found" }), {
@@ -30,6 +31,10 @@ createServer((incoming, outgoing) => {
       outgoing.writeHead(500, { "content-type": "application/json" });
       outgoing.end(JSON.stringify({ error: "Internal server error" }));
     });
-}).listen(port, "0.0.0.0", () => {
+});
+
+registerGracefulShutdown(server);
+
+server.listen(port, "0.0.0.0", () => {
   console.log(`Daymark API listening on http://0.0.0.0:${port}`);
 });

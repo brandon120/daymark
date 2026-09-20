@@ -34,7 +34,7 @@ async function main() {
     console.warn("DATABASE_URL is not set. Starting without migrations.");
   }
 
-  await run("node", ["apps/api/production.mjs"]);
+  await import(new URL("../apps/api/production.mjs", import.meta.url).href);
 }
 
 main().catch((error) => {

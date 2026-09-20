@@ -568,7 +568,7 @@ export function App() {
 
     if (usingApi) {
       const updated = await applyTodayUpdate(
-        enqueueCodingTaskRequest(activeProject.name),
+        enqueueCodingTaskRequest(activeProject.name, crypto.randomUUID()),
         `Planning started for ${activeProject.name}. No sandbox has been created yet.`,
       );
       if (!updated && today) {
@@ -611,7 +611,7 @@ export function App() {
 
     if (usingApi) {
       const updated = await applyTodayUpdate(
-        setActiveProjectRequest(id),
+        setActiveProjectRequest(id, crypto.randomUUID()),
         `${today.projects.find((project) => project.id === id)?.name} is now active context.`,
       );
       if (updated) setToday(updated);
@@ -625,7 +625,7 @@ export function App() {
   async function handleBeeChange(value) {
     if (usingApi) {
       await applyTodayUpdate(
-        setBeeLiveRequest(value),
+        setBeeLiveRequest(value, crypto.randomUUID()),
         value ? "Bee live context enabled." : "Bee live context paused.",
       );
       return;

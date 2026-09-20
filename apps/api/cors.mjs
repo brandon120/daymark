@@ -20,7 +20,7 @@ function resolveOrigin(request) {
   }
 
   const allowed = allowedOrigins();
-  if (allowed.includes("*") || allowed.includes(requestOrigin)) {
+  if (allowed.includes(requestOrigin)) {
     return requestOrigin;
   }
 

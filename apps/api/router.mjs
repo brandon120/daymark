@@ -1,6 +1,7 @@
 import { readJsonBody } from "./body.mjs";
 import { authenticateRequest } from "./auth.mjs";
 import { preflightResponse, withCors } from "./cors.mjs";
+import { handleHealth } from "./handlers/health.mjs";
 import {
   handleCreateSession,
   handleDeleteSession,
@@ -43,7 +44,8 @@ export async function handleApiRequest(incoming) {
   }
 
   if (request.method === "GET" && pathname === "/health") {
-    return withCors(request, jsonResponse(200, { ok: true, service: "daymark" }));
+    const result = await handleHealth();
+    return withCors(request, jsonResponse(result.status, result.body));
   }
 
   if (request.method === "GET" && pathname === "/v1/session") {

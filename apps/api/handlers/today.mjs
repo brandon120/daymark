@@ -3,6 +3,18 @@ import { findIdempotentResponse, storeIdempotentResponse } from "@daymark/databa
 import { getPool } from "@daymark/database/pool";
 import { getTodayAggregate, recordAuditEvent } from "@daymark/database/queries/today";
 
+function isUniqueViolation(error) {
+  return error?.code === "23505";
+}
+
+function duplicateCodingTaskBody(projectName, today) {
+  return {
+    error: "duplicate_active_task",
+    message: `${projectName} already has an active planning task in the queue.`,
+    today,
+  };
+}
+
 async function finishMutation(client, workspaceId, idempotencyKey, status, body) {
   await storeIdempotentResponse(client, workspaceId, idempotencyKey, status, body);
   return { status, body };
@@ -199,11 +211,13 @@ export async function handleEnqueueCodingTask(workspaceId, actor, projectName, i
 
     if (existing.rowCount > 0) {
       const today = await getTodayAggregate(client, workspaceId);
-      const result = await finishMutation(client, workspaceId, idempotencyKey, 409, {
-        error: "duplicate_active_task",
-        message: `${projectName} already has an active planning task in the queue.`,
-        today,
-      });
+      const result = await finishMutation(
+        client,
+        workspaceId,
+        idempotencyKey,
+        409,
+        duplicateCodingTaskBody(projectName, today),
+      );
       await client.query("COMMIT");
       return { status: 409, body: result.body };
     }
@@ -214,21 +228,37 @@ export async function handleEnqueueCodingTask(workspaceId, actor, projectName, i
       [workspaceId, projectName],
     );
 
-    await client.query(
-      `INSERT INTO tasks (id, workspace_id, project_id, kind, title, description, elapsed_label, status, phase)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [
-        task.id,
-        workspaceId,
-        project.rows[0]?.id ?? null,
-        task.kind,
-        task.title,
-        task.description,
-        task.elapsed,
-        task.status,
-        task.phase,
-      ],
-    );
+    try {
+      await client.query(
+        `INSERT INTO tasks (id, workspace_id, project_id, kind, title, description, elapsed_label, status, phase)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          task.id,
+          workspaceId,
+          project.rows[0]?.id ?? null,
+          task.kind,
+          task.title,
+          task.description,
+          task.elapsed,
+          task.status,
+          task.phase,
+        ],
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        const today = await getTodayAggregate(client, workspaceId);
+        const result = await finishMutation(
+          client,
+          workspaceId,
+          idempotencyKey,
+          409,
+          duplicateCodingTaskBody(projectName, today),
+        );
+        await client.query("COMMIT");
+        return { status: 409, body: result.body };
+      }
+      throw error;
+    }
 
     await recordAuditEvent(client, {
       workspaceId,

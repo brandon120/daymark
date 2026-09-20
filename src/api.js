@@ -72,27 +72,27 @@ export function togglePriority(priorityId, idempotencyKey) {
   });
 }
 
-export function setActiveProject(projectId) {
+export function setActiveProject(projectId, idempotencyKey) {
   return request("/v1/workspace/active-project", {
     method: "PATCH",
     body: JSON.stringify({ projectId }),
-    idempotencyKey: `active-project:${projectId}`,
+    idempotencyKey,
   });
 }
 
-export function setBeeLive(beeLive) {
+export function setBeeLive(beeLive, idempotencyKey) {
   return request("/v1/workspace/bee-live", {
     method: "PATCH",
     body: JSON.stringify({ beeLive }),
-    idempotencyKey: `bee-live:${beeLive}`,
+    idempotencyKey,
   });
 }
 
-export function enqueueCodingTask(projectName) {
+export function enqueueCodingTask(projectName, idempotencyKey) {
   return request("/v1/tasks/coding", {
     method: "POST",
     body: JSON.stringify({ projectName }),
-    idempotencyKey: `coding-task:${projectName}`,
+    idempotencyKey,
   });
 }
 

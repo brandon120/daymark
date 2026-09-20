@@ -16,7 +16,11 @@ test("health endpoint is public and includes CORS headers for allowed dev origin
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("access-control-allow-origin"), "http://localhost:4173");
-  assert.deepEqual(await response.json(), { ok: true, service: "daymark" });
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    service: "daymark",
+    database: "not_configured",
+  });
 });
 
 test("serves the built client shell when dist/client exists", async (t) => {

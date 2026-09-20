@@ -60,7 +60,7 @@ are planned for Phase 3.
 
 Railway runs:
 
-- **Build:** `npm ci && npm run build:railway`
+- **Build:** `npm run build:railway` (Railpack installs dependencies before this step)
 - **Start:** migrations, optional seed, then `apps/api/production.mjs`
 
 Health check path: `/health`
